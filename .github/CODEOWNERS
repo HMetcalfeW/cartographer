@@ -1,0 +1,5 @@
+# CODEOWNERS file for Cartographer
+# This file designates code owners for the repository.
+# Format: <file pattern> <owner(s)>
+
+* @HMetcalfeW
