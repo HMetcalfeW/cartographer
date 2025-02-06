@@ -1,0 +1,13 @@
+repos:
+  - repo: local
+    hooks:
+      - id: make-lint
+        name: make lint
+        entry: make lint
+        language: system
+        types: [go]
+      - id: make-test
+        name: make test
+        entry: make test
+        language: system
+        types: [go]
