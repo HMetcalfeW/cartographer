@@ -1,3 +1,5 @@
+![cobra logo](assets/CartographerMain.png)
+
 # Cartographer
 Cartographer is a lightweight CLI tool written in Go that maps and visualizes relationships between Kubernetes resources. It ingests Kubernetes manifests—either directly from YAML files or via Helm charts using the Helm SDK—and generates dependency graphs to help you better understand your application's architecture.
 
