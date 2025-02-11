@@ -26,3 +26,6 @@ go.work.sum
 
 # Build files
 build/
+
+# Mac files
+.DS_STORE
