@@ -6,9 +6,16 @@ BUILD_DIR=build
 LDFLAGS=-ldflags="-X main.version=$(VERSION)"
 
 # Targets
-.PHONY: all clean lint test build docker
+.PHONY: all clean lint test build docker deps
 
-all: lint test build
+all: deps lint test build
+
+deps:
+	go get -u github.com/spf13/cobra
+	go get -u github.com/spf13/viper
+	go get -u k8s.io/apimachinery
+	go get -u sigs.k8s.io/yaml
+	go mod tidy
 
 clean:
 	@rm -rf $(BUILD_DIR)
