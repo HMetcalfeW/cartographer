@@ -6,9 +6,16 @@ BUILD_DIR=build
 LDFLAGS=-ldflags="-X main.version=$(VERSION)"
 
 # Targets
-.PHONY: all clean lint test build docker
+.PHONY: all clean lint test build docker deps
 
-all: lint test build
+all: deps lint test build
+
+deps:
+	go get -u github.com/spf13/cobra
+	go get -u github.com/spf13/viper
+	go get -u k8s.io/apimachinery
+	go get -u sigs.k8s.io/yaml
+	go mod tidy
 
 clean:
 	@rm -rf $(BUILD_DIR)
@@ -26,8 +33,8 @@ test:
 build:
 	@mkdir -p $(BUILD_DIR)/linux
 	@mkdir -p $(BUILD_DIR)/darwin_arm64
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux/$(BINARY_NAME) ./cmd/$(BINARY_NAME)
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/darwin_arm64/$(BINARY_NAME) ./cmd/$(BINARY_NAME)
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux/$(BINARY_NAME) .
+	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/darwin_arm64/$(BINARY_NAME) .
 	@echo "Build complete."
 
 # Use a multi-stage Dockerfile for a minimal runtime image
