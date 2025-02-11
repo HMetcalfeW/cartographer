@@ -5,10 +5,11 @@ import (
 	"testing"
 
 	"github.com/HMetcalfeW/cartographer/pkg/parser"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseYAMLFile(t *testing.T) {
-	// Create a temporary YAML file with two Kubernetes documents.
 	yamlContent := `
 apiVersion: v1
 kind: Pod
@@ -21,36 +22,30 @@ metadata:
   name: test-deployment
 `
 
+	// Create a temporary YAML file using os.CreateTemp.
 	tmpfile, err := os.CreateTemp("", "test-*.yaml")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
+	require.NoError(t, err, "Failed to create temp file")
 
-	// Defer removal and check the error returned by os.Remove.
+	// Defer removal of the temp file and log any errors.
 	defer func() {
 		if err := os.Remove(tmpfile.Name()); err != nil {
 			t.Logf("failed to remove temp file: %v", err)
 		}
 	}()
 
-	if _, err := tmpfile.Write([]byte(yamlContent)); err != nil {
-		t.Fatalf("Failed to write to temp file: %v", err)
-	}
+	// Write the YAML content to the temporary file.
+	_, err = tmpfile.Write([]byte(yamlContent))
+	require.NoError(t, err, "Failed to write to temp file")
 
-	if err := tmpfile.Close(); err != nil {
-		t.Fatalf("Failed to close the temp file: %v", err)
-	}
+	err = tmpfile.Close()
+	require.NoError(t, err, "Failed to close temp file")
 
 	// Invoke the parser.
 	objs, err := parser.ParseYAMLFile(tmpfile.Name())
-	if err != nil {
-		t.Fatalf("ParseYAMLFile returned error: %v", err)
-	}
+	require.NoError(t, err, "ParseYAMLFile returned an error")
 
-	// We expect two objects.
-	if len(objs) != 2 {
-		t.Fatalf("Expected 2 objects, got %d", len(objs))
-	}
+	// We expect exactly 2 objects.
+	require.Equal(t, 2, len(objs), "Expected 2 objects")
 
 	// Verify that one object is a Pod and the other is a Deployment.
 	var foundPod, foundDeployment bool
@@ -63,10 +58,6 @@ metadata:
 		}
 	}
 
-	if !foundPod {
-		t.Error("Expected to find a Pod object, but did not")
-	}
-	if !foundDeployment {
-		t.Error("Expected to find a Deployment object, but did not")
-	}
+	assert.True(t, foundPod, "Expected to find a Pod object")
+	assert.True(t, foundDeployment, "Expected to find a Deployment object")
 }
