@@ -33,8 +33,8 @@ test:
 build:
 	@mkdir -p $(BUILD_DIR)/linux
 	@mkdir -p $(BUILD_DIR)/darwin_arm64
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux/$(BINARY_NAME) ./cmd/$(BINARY_NAME)
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/darwin_arm64/$(BINARY_NAME) ./cmd/$(BINARY_NAME)
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux/$(BINARY_NAME) .
+	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/darwin_arm64/$(BINARY_NAME) .
 	@echo "Build complete."
 
 # Use a multi-stage Dockerfile for a minimal runtime image
