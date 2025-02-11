@@ -13,10 +13,9 @@ var cfgFile string
 // rootCmd represents the base command.
 var rootCmd = &cobra.Command{
 	Use:   "cartographer",
-	Short: "Cartographer maps your Kubernetes resources",
+	Short: "Cartographer maps your Helm Chart Kubernetes resources",
 	Run: func(cmd *cobra.Command, args []string) {
-		err := cmd.Help()
-		if err != nil {
+		if err := cmd.Help(); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
