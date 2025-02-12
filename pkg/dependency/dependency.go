@@ -2,8 +2,8 @@ package dependency
 
 import (
 	"fmt"
-	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -14,20 +14,32 @@ import (
 func BuildDependencies(objs []*unstructured.Unstructured) map[string][]string {
 	dependencies := make(map[string][]string)
 
+	log.WithFields(log.Fields{
+		"func":         "BuildDependencies",
+		"object_count": len(objs),
+	}).Info("Starting dependency analysis")
+
 	// Create a quick lookup table for all objects by ID (Kind/Name).
 	objectsByID := make(map[string]*unstructured.Unstructured)
 	for _, obj := range objs {
-		id := fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName())
+		id := resourceID(obj)
 		objectsByID[id] = obj
 	}
 
 	// 1. Process OwnerReferences.
 	//    A child's ownerReference means: Owner -> Child
 	for _, obj := range objs {
-		childID := fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName())
+		childID := resourceID(obj)
 		for _, owner := range obj.GetOwnerReferences() {
-			ownerID := fmt.Sprintf("%s/%s", owner.Kind, owner.Name)
+			ownerID := owner.Kind + "/" + owner.Name
 			dependencies[ownerID] = append(dependencies[ownerID], childID)
+
+			log.WithFields(log.Fields{
+				"func":      "BuildDependencies",
+				"ownerID":   ownerID,
+				"childID":   childID,
+				"childKind": obj.GetKind(),
+			}).Debug("Added owner reference dependency")
 		}
 	}
 
@@ -38,40 +50,70 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]string {
 		if obj.GetKind() != "Service" {
 			continue
 		}
+		serviceID := resourceID(obj)
 
-		serviceID := fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName())
 		spec, found, err := unstructured.NestedMap(obj.Object, "spec")
 		if err != nil || !found {
-			continue
-		}
-		selector, found, err := unstructured.NestedStringMap(spec, "selector")
-		if err != nil || !found {
+			log.WithFields(log.Fields{
+				"func":    "BuildDependencies",
+				"service": serviceID,
+				"error":   err,
+			}).Debug("No spec found for service or error accessing it")
 			continue
 		}
 
-		// Compare the selector with the labels of all other objects.
+		selector, found, err := unstructured.NestedStringMap(spec, "selector")
+		if err != nil || !found {
+			log.WithFields(log.Fields{
+				"func":    "BuildDependencies",
+				"service": serviceID,
+				"error":   err,
+			}).Debug("No selector found for service or error accessing it")
+			continue
+		}
+
 		for _, target := range objs {
 			targetLabels := target.GetLabels()
 			if labelsMatch(selector, targetLabels) {
-				targetID := fmt.Sprintf("%s/%s", target.GetKind(), target.GetName())
+				targetID := resourceID(target)
 				dependencies[serviceID] = append(dependencies[serviceID], targetID)
+
+				log.WithFields(log.Fields{
+					"func":      "BuildDependencies",
+					"serviceID": serviceID,
+					"targetID":  targetID,
+				}).Debug("Added service->target dependency")
 			}
 		}
 	}
 
+	log.WithFields(log.Fields{
+		"func":               "BuildDependencies",
+		"dependencies_count": len(dependencies),
+	}).Info("Finished building dependencies")
+
 	return dependencies
 }
 
-// PrintDependencies prints the dependency map to stdout.
+// PrintDependencies logs the dependency map at Info level.
 func PrintDependencies(deps map[string][]string) {
+	log.WithField("func", "PrintDependencies").
+		Info("Printing dependency relationships")
+
 	for parent, children := range deps {
 		if len(children) == 0 {
 			continue
 		}
-		fmt.Printf("%s -> [", parent)
-		fmt.Print(strings.Join(children, ", "))
-		fmt.Println("]")
+		log.WithFields(log.Fields{
+			"parent":   parent,
+			"children": children,
+		}).Info("Dependency relationship")
 	}
+}
+
+// resourceID constructs a unique identifier for a resource using Kind/Name.
+func resourceID(obj *unstructured.Unstructured) string {
+	return fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName())
 }
 
 // labelsMatch checks if all key-value pairs in 'selector' are present

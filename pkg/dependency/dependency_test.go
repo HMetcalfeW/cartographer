@@ -3,12 +3,19 @@ package dependency_test
 import (
 	"testing"
 
-	"github.com/HMetcalfeW/cartographer/pkg/dependency"
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/HMetcalfeW/cartographer/pkg/dependency"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestBuildDependencies(t *testing.T) {
+	// Set log level to Debug for this test run, if desired.
+	log.SetLevel(log.DebugLevel)
+
+	log.Debug("Setting up test objects for dependency analysis")
+
 	// Create a Deployment
 	deployment := &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -75,14 +82,13 @@ func TestBuildDependencies(t *testing.T) {
 		},
 	}
 
-	// Convert all to Unstructured objects
+	// Combine objects into a slice
 	objs := []*unstructured.Unstructured{deployment, replicaSet, pod, service}
+
+	log.Debug("Running BuildDependencies")
 
 	// Build the dependencies.
 	deps := dependency.BuildDependencies(objs)
-
-	// Optional: Print them for debugging (comment out if not needed).
-	// dependency.PrintDependencies(deps)
 
 	// Check dependencies:
 	// 1. Deployment -> ReplicaSet
@@ -100,4 +106,6 @@ func TestBuildDependencies(t *testing.T) {
 	// 4. Pod has no children
 	_, hasPodChildren := deps["Pod/test-pod"]
 	assert.False(t, hasPodChildren, "Expected no child resources for Pod")
+
+	log.Debug("TestBuildDependencies completed successfully")
 }
