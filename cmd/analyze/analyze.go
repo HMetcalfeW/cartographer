@@ -67,7 +67,8 @@ func init() {
 
 	// Define flags for the analyze command.
 	AnalyzeCmd.Flags().StringP("input", "i", "", "Path to Kubernetes YAML file")
-	AnalyzeCmd.Flags().StringP("chart", "c", "", "Path to a Helm chart directory")
+	AnalyzeCmd.Flags().StringP("chart", "c", "", "Chart reference or local path to a Helm chart (e.g. bitnami/postgres)")
+	AnalyzeCmd.Flags().StringP("values", "v", "", "Path to a values file for the Helm chart")
 	AnalyzeCmd.Flags().StringP("repo", "r", "", "Helm chart repository URL (optional)")
 
 	// Bind flags with Viper.
