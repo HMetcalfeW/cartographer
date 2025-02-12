@@ -2,6 +2,7 @@ package dependency
 
 import (
 	"fmt"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -109,6 +110,30 @@ func PrintDependencies(deps map[string][]string) {
 			"children": children,
 		}).Info("Dependency relationship")
 	}
+}
+
+// GenerateDOT creates a DOT graph from the given dependency map.
+func GenerateDOT(deps map[string][]string) string {
+	var sb strings.Builder
+	sb.WriteString("digraph G {\n")
+
+	// Optionally set some DOT attributes for readability
+	sb.WriteString("    rankdir=\"LR\";\n") // Left-to-right layout
+	sb.WriteString("    node [shape=box];\n\n")
+
+	for parent, children := range deps {
+		for _, child := range children {
+			// Escape quotes if needed; for simplicity, we'll just wrap them
+			sb.WriteString(fmt.Sprintf("    \"%s\" -> \"%s\";\n", parent, child))
+		}
+	}
+	sb.WriteString("}\n")
+
+	log.WithFields(log.Fields{
+		"func": "GenerateDOT",
+	}).Info("Generated DOT content")
+
+	return sb.String()
 }
 
 // resourceID constructs a unique identifier for a resource using Kind/Name.
