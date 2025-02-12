@@ -6,16 +6,18 @@ BUILD_DIR=build
 LDFLAGS=-ldflags="-X main.version=$(VERSION)"
 
 # Targets
-.PHONY: all clean lint test build docker deps
+.PHONY: all deps clean lint test coverhtml build docker
 
 all: deps lint test build
 
 deps:
-	go get -u github.com/spf13/cobra
-	go get -u github.com/spf13/viper
-	go get -u k8s.io/apimachinery
-	go get -u sigs.k8s.io/yaml
-	go mod tidy
+	@echo "Installing dependencies..."
+	@go get -u github.com/spf13/cobra@latest
+	@go get -u github.com/spf13/viper@latest
+	@go get -u k8s.io/apimachinery@latest
+	@go get -u sigs.k8s.io/yaml@latest
+	@go mod tidy
+	@echo "Dependencies installed."
 
 clean:
 	@rm -rf $(BUILD_DIR)
@@ -26,8 +28,15 @@ lint:
 	@echo "Linting complete."
 
 test:
-	@go test ./...
+	@echo "Running tests with coverage..."
+	@go test -coverprofile=coverage.out ./...
+	@go tool cover -func=coverage.out
 	@echo "Tests passed."
+
+coverhtml: test
+	@echo "Generating HTML coverage report..."
+	@go tool cover -html=coverage.out -o coverage.html
+	@echo "HTML coverage report generated at coverage.html"
 
 # Build for Linux and Mac ARM
 build:
