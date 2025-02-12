@@ -20,7 +20,7 @@ func ParseYAMLFile(path string) ([]*unstructured.Unstructured, error) {
 		"func":     "ParseYAMLFile",
 		"filepath": path,
 	})
-	logger.Info("Initializing root config")
+	logger.Info("Parsing yaml input")
 
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -61,5 +61,19 @@ func initConfig() {
 
 	if err := viper.ReadInConfig(); err == nil {
 		logger.Info("Using config file:", viper.ConfigFileUsed())
+	} else {
+		logger.WithError(err).Info("Error")
+	}
+
+	// Now update the logging level based on the configuration.
+	levelStr := viper.GetString("log.level")
+	if levelStr != "" {
+		lvl, err := log.ParseLevel(levelStr)
+		if err != nil {
+			logger.Warnf("Invalid log level %q, using default Info level", levelStr)
+		} else {
+			log.SetLevel(lvl)
+			logger.Infof("Log level set to %s", lvl)
+		}
 	}
 }
