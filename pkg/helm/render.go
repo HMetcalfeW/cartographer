@@ -12,13 +12,27 @@ import (
 )
 
 // RenderChart loads a Helm chart from the given chartPath and renders it using an optional
-// values file (valuesFile). It returns the combined YAML output.
-func RenderChart(chartPath string, valuesFile string) (string, error) {
+// values file (valuesFile), a release name (releaseName), and a repo URL (repoURL).
+// If the chart is not found locally and repoURL is provided, it will return an error
+// (remote chart downloading is not implemented in this example).
+func RenderChart(chartPath string, valuesFile string, releaseName string, repoURL string) (string, error) {
 	logger := log.WithFields(log.Fields{
-		"func":       "RenderChart",
-		"chartPath":  chartPath,
-		"valuesFile": valuesFile,
+		"func":        "RenderChart",
+		"chartPath":   chartPath,
+		"valuesFile":  valuesFile,
+		"releaseName": releaseName,
+		"repoURL":     repoURL,
 	})
+
+	// Check if chartPath exists locally.
+	if _, err := os.Stat(chartPath); os.IsNotExist(err) {
+		if repoURL != "" {
+			logger.Error("chart not found locally; remote chart downloading not implemented")
+			return "", err
+		}
+		logger.Error("chart not found locally and no repoURL provided")
+		return "", err
+	}
 
 	// Load the chart from the specified path.
 	chart, err := loader.Load(chartPath)
@@ -41,16 +55,21 @@ func RenderChart(chartPath string, valuesFile string) (string, error) {
 		}
 	}
 
-	// Merge the chart's default values with the user-provided overrides using Helm's CoalesceValues.
+	// Merge the chart's default values with user-provided overrides.
 	mergedValues, err := chartutil.CoalesceValues(chart, values)
 	if err != nil {
 		logger.Error("failed to merge values")
 		return "", err
 	}
 
-	// Create a full render context using ToRenderValues. This ensures that the context
-	// includes the proper .Values, .Chart, etc., needed for rendering.
-	renderContext, err := chartutil.ToRenderValues(chart, mergedValues, chartutil.ReleaseOptions{}, nil)
+	// Create release options using the provided release name.
+	releaseOptions := chartutil.ReleaseOptions{
+		Name:      releaseName,
+		Namespace: "default", // For now, we use "default". This could be made configurable.
+	}
+
+	// Build a full render context using Helm's ToRenderValues.
+	renderContext, err := chartutil.ToRenderValues(chart, mergedValues, releaseOptions, nil)
 	if err != nil {
 		logger.Error("failed to create render context")
 		return "", err
@@ -73,6 +92,6 @@ func RenderChart(chartPath string, valuesFile string) (string, error) {
 		k8sManifests.WriteString("\n---\n")
 	}
 
-	logger.WithField("k8sManifests", k8sManifests).Info("Successfully rendered chart")
+	logger.Info("Successfully rendered chart")
 	return k8sManifests.String(), nil
 }

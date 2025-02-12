@@ -65,7 +65,7 @@ spec:
 	require.NoError(t, err, "failed to close values file")
 
 	// Call RenderChart with the chart directory and the values file.
-	rendered, err := helm.RenderChart(chartDir, valuesFile.Name())
+	rendered, err := helm.RenderChart(chartDir, valuesFile.Name(), "test-release", "")
 	require.NoError(t, err, "RenderChart returned an error")
 
 	// Debug output if needed.

@@ -2,12 +2,13 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
+	"os"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/HMetcalfeW/cartographer/pkg/helm"
 	"github.com/HMetcalfeW/cartographer/pkg/parser"
 )
 
@@ -21,55 +22,90 @@ var AnalyzeCmd = &cobra.Command{
 			"args": args,
 		})
 
+		// Retrieve flags.
 		inputPath := viper.GetString("input")
 		chartPath := viper.GetString("chart")
+		valuesFile := viper.GetString("values")
 		repoURL := viper.GetString("repo")
+		releaseName := viper.GetString("release")
 
 		// Ensure at least one input is provided.
 		if inputPath == "" && chartPath == "" {
 			return fmt.Errorf("no input file or chart provided; please specify --input or --chart")
 		}
 
-		// Check user provided input first
+		// variable storing the render Helm chart's k8s manifests
+		var k8sManifests string
+
+		// If an input file is provided, read it.
 		if inputPath != "" {
-
-			// Process YAML file input if provided.
-			absPath, err := filepath.Abs(inputPath)
+			data, err := os.ReadFile(inputPath)
 			if err != nil {
-				return fmt.Errorf("failed to get absolute path: %w", err)
+				return fmt.Errorf("failed to read input file: %w", err)
 			}
-			objs, err := parser.ParseYAMLFile(absPath)
-			if err != nil {
-				return fmt.Errorf("failed to parse YAML file: %w", err)
-			}
-
-			logger.Infof("Parsed %d objects from input file\n", len(objs))
-
-		} else {
-			// Placeholder for Helm chart processing.
-			if chartPath != "" {
-				logger.Debug("Rendering Helm chart from path")
-				if repoURL != "" {
-					fmt.Printf("Using Helm repository: %s\n", repoURL)
-				}
-				// TODO: Render and parse the Helm chart using the Helm SDK.
-			}
-
+			k8sManifests = string(data)
 		}
 
+		// If a chart reference is provided, render it using the Helm SDK.
+		if chartPath != "" {
+			logger = logger.WithFields(log.Fields{
+				"chart":       chartPath,
+				"values":      valuesFile,
+				"repo":        repoURL,
+				"releaseName": releaseName,
+			})
+			logger.Info("Rendering Helm chart")
+			rendered, err := helm.RenderChart(chartPath, valuesFile, releaseName, repoURL)
+			if err != nil {
+				logger.WithError(err).Error("failed to render chart")
+				return err
+			}
+			k8sManifests = rendered
+		}
+
+		// Write the YAML content to a temporary file for parsing.
+		tmpFile, err := os.CreateTemp("", "analyze-rendered-*.yaml")
+		if err != nil {
+			logger.WithError(err).Error("failed to create temporary file")
+			return err
+		}
+
+		defer func() {
+			if err := os.Remove(tmpFile.Name()); err != nil {
+				logger.WithError(err).Error("failed to remove tmp file")
+			}
+		}()
+
+		if _, err = tmpFile.Write([]byte(k8sManifests)); err != nil {
+			logger.WithError(err).Error("failed to write YAML content to temp file")
+			return err
+		}
+
+		if err := tmpFile.Close(); err != nil {
+			logger.WithError(err).Error("failed to close temp file")
+			return err
+		}
+
+		// Parse the YAML content.
+		objs, err := parser.ParseYAMLFile(tmpFile.Name())
+		if err != nil {
+			logger.WithError(err).Error("failed to parse YAML content in temp file")
+			return err
+		}
+		log.Infof("Parsed %d objects", len(objs))
 		return nil
 	},
 }
 
 func init() {
-	const funcName = "analyze.init"
-	log.WithField("func", funcName).Info("initializing cartographer subcommand analyze")
+	log.WithField("func", "analyze.init").Info("initializing cartographer subcommand analyze")
 
 	// Define flags for the analyze command.
 	AnalyzeCmd.Flags().StringP("input", "i", "", "Path to Kubernetes YAML file")
 	AnalyzeCmd.Flags().StringP("chart", "c", "", "Chart reference or local path to a Helm chart (e.g. bitnami/postgres)")
 	AnalyzeCmd.Flags().StringP("values", "v", "", "Path to a values file for the Helm chart")
 	AnalyzeCmd.Flags().StringP("repo", "r", "", "Helm chart repository URL (optional)")
+	AnalyzeCmd.Flags().StringP("release", "l", "cartographer-release", "Release name for the Helm chart")
 
 	// Bind flags with Viper.
 	if err := viper.BindPFlag("input", AnalyzeCmd.Flags().Lookup("input")); err != nil {
@@ -80,7 +116,15 @@ func init() {
 		log.WithError(err).Fatal("failed to bind the flag `chart`")
 	}
 
+	if err := viper.BindPFlag("values", AnalyzeCmd.Flags().Lookup("values")); err != nil {
+		log.WithError(err).Fatal("failed to bind the flag `values`")
+	}
+
 	if err := viper.BindPFlag("repo", AnalyzeCmd.Flags().Lookup("repo")); err != nil {
 		log.WithError(err).Fatal("failed to bind the flag `repo`")
+	}
+
+	if err := viper.BindPFlag("release", AnalyzeCmd.Flags().Lookup("release")); err != nil {
+		log.WithError(err).Fatal("failed to bind the flag `release`")
 	}
 }
