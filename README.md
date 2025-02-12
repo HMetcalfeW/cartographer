@@ -56,29 +56,51 @@ Cartographer provides a flexible CLI with several subcommands. Examples include:
 cartographer analyze --input /path/to/manifest.yaml
 ```
 
-### Analyze a Helm Chart
+### Analyze a Local Helm Chart
 Render a Helm chart by specifying its path and (optionally) the repository URL:
 
 ```bash
-cartographer analyze --chart /path/to/chart --repo https://charts.example.com
+cartographer analyze --chart /path/to/chart --release my-release --values /path/to/values
+```
+
+### Analyze a Remote Helm Chart
+Render a Helm chart by specifying its path and (optionally) the repository URL:
+
+```bash
+cartographer analyze --chart /path/to/chart --repo https://charts.example.com --release my-release --values /path/to/values
 ```
 
 Common Flags:
+- `--config`: Custom configuration file (default is $HOME/.cartographer.yaml).
 - `--input`: Path to a Kubernetes YAML file.
 - `--chart`: Path to a Helm chart directory.
+- `--release`: Release name of your Helm release
+- `--values`: Path to your Helm values file
 - `--repo`: (Optional) Helm chart repository URL.
-- `--config`: Custom configuration file (default is $HOME/.cartographer.yaml).
 
 When a Helm chart is specified, Cartographer uses the Helm SDK to render the chart into Kubernetes manifests, then processes them as usual.
+
+## Lint
+```bash
+make lint
+```
+
+## Testing
+Unit tests are provided for all functions. You can run tests and generate a code coverage report with:
+
+```bash
+make test
+```
 
 ## Building
 To build the Cartographer executable, run:
 
 ```bash
-go build -o cartographer .
+make build
 ```
 
 Make sure you have a proper main.go in the project root (in package main) that calls your CLI command execution logic (for example, by calling cmd/cartographer.Execute()).
+
 
 ## Docker & Docker Compose
 Cartographer can be containerized for easy deployment.
@@ -86,21 +108,13 @@ Cartographer can be containerized for easy deployment.
 ### Build the Docker Image
 
 ```bash
-docker build -t cartographer:<your_tag> .
+make docker
 ```
 
 ### Run with Docker Compose
 
 ```bash
 docker-compose up
-```
-
-## Testing
-
-Unit tests are provided for all functions. Run tests with:
-
-```bash
-go test ./...
 ```
 
 ## Versioning
