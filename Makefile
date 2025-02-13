@@ -6,18 +6,21 @@ BUILD_DIR=build
 LDFLAGS=-ldflags="-X main.version=$(VERSION)"
 
 # Targets
-.PHONY: all deps clean lint test coverhtml build docker
+.PHONY: all deps update-deps clean lint test coverhtml build docker
 
 all: deps lint test build
 
 deps:
 	@echo "Installing dependencies..."
-	@go get -u github.com/spf13/cobra@latest
-	@go get -u github.com/spf13/viper@latest
-	@go get -u k8s.io/apimachinery@latest
-	@go get -u sigs.k8s.io/yaml@latest
 	@go mod tidy
 	@echo "Dependencies installed."
+
+update-deps:
+	@echo "Updating dependencies..."
+	@go get -u
+	@go mod tidy
+	@echo "Finished Updating Dependencies."
+
 
 clean:
 	@rm -rf $(BUILD_DIR)

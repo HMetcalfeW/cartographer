@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/HMetcalfeW/cartographer/pkg/dependency"
 	"github.com/HMetcalfeW/cartographer/pkg/helm"
 	"github.com/HMetcalfeW/cartographer/pkg/parser"
 )
@@ -28,6 +29,8 @@ var AnalyzeCmd = &cobra.Command{
 		valuesFile := viper.GetString("values")
 		repoURL := viper.GetString("repo")
 		releaseName := viper.GetString("release")
+		outputFormat := viper.GetString("output-format")
+		outputFile := viper.GetString("output-file")
 
 		// Ensure at least one input is provided.
 		if inputPath == "" && chartPath == "" {
@@ -93,6 +96,28 @@ var AnalyzeCmd = &cobra.Command{
 			return err
 		}
 		log.Infof("Parsed %d objects", len(objs))
+
+		// Build the dependency map.
+		deps := dependency.BuildDependencies(objs)
+
+		if outputFormat == "dot" {
+			dotContent := dependency.GenerateDOT(deps)
+			if outputFile == "" {
+				// Print to stdout
+				fmt.Println(dotContent)
+			} else {
+				// Write to a file
+				if err := os.WriteFile(outputFile, []byte(dotContent), 0644); err != nil {
+					return fmt.Errorf("failed to write DOT output: %w", err)
+				}
+				log.Infof("DOT file saved to %s", outputFile)
+			}
+		} else {
+			// Default: just print dependencies in text form
+			log.Info("Dependencies:")
+			dependency.PrintDependencies(deps)
+		}
+
 		return nil
 	},
 }
@@ -106,6 +131,8 @@ func init() {
 	AnalyzeCmd.Flags().StringP("values", "v", "", "Path to a values file for the Helm chart")
 	AnalyzeCmd.Flags().StringP("repo", "r", "", "Helm chart repository URL (optional)")
 	AnalyzeCmd.Flags().StringP("release", "l", "cartographer-release", "Release name for the Helm chart")
+	AnalyzeCmd.Flags().String("output-format", "", "Output format (e.g. 'dot'). If empty, prints text dependencies.")
+	AnalyzeCmd.Flags().String("output-file", "", "Output file for the DOT data (if --output-format=dot). Prints to stdout by default.")
 
 	// Bind flags with Viper.
 	if err := viper.BindPFlag("input", AnalyzeCmd.Flags().Lookup("input")); err != nil {
@@ -126,5 +153,13 @@ func init() {
 
 	if err := viper.BindPFlag("release", AnalyzeCmd.Flags().Lookup("release")); err != nil {
 		log.WithError(err).Fatal("failed to bind the flag `release`")
+	}
+
+	if err := viper.BindPFlag("output-format", AnalyzeCmd.Flags().Lookup("output-format")); err != nil {
+		log.WithError(err).Fatal("failed to bind the flag `output-format`")
+	}
+
+	if err := viper.BindPFlag("output-file", AnalyzeCmd.Flags().Lookup("output-file")); err != nil {
+		log.WithError(err).Fatal("failed to bind the flag `output-file`")
 	}
 }

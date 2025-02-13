@@ -1,31 +1,49 @@
-![cobra logo](assets/CartographerMain.png)
+![cart-gopher logo](assets/CartographerMain.png)
 
 # Cartographer
-Cartographer is a lightweight CLI tool written in Go that maps and visualizes relationships between Kubernetes resources. It ingests Kubernetes manifests—either directly from YAML files or via Helm charts using the Helm SDK—and generates dependency graphs to help you better understand your application's architecture.
+
+Cartographer is a lightweight CLI tool written in Go that analyzes and visualizes relationships between Kubernetes resources. It ingests Kubernetes manifests—either from YAML files or via the Helm SDK—and produces dependency graphs to help you understand and document your application's architecture.
 
 ## Features
 
 - **Kubernetes Manifest Ingestion**  
-  Parse multi-document YAML files and convert them into structured Kubernetes objects for analysis.
+  - Parse multi-document YAML files and convert them into structured Kubernetes objects for analysis.
+  - Support for ephemeral containers, environment variable references, volume references (Secrets, ConfigMaps, PVCs), and more.
+
 - **Helm Chart Support**  
-  Render and analyze Kubernetes manifests from Helm charts by specifying the chart path and repository via command-line flags, similar to the Helm CLI.
-- **Dependency Analysis**  
-  Analyze resource relationships (e.g., linking Services to Deployments, referencing ConfigMaps/Secrets) to build a dependency graph.
+  - Render and analyze Kubernetes manifests from Helm charts via the Helm SDK.
+  - Specify the chart path and repo URL similarly to Helm CLI usage (e.g., `--chart`, `--repo`, `--release`, `--values`).
+
+- **Dependency Analysis with Labeled Edges**  
+  - Detect references such as:
+    - **Owner References** (e.g., Deployment owned by a HelmRelease).
+    - **Pod Spec References** (Secrets, ConfigMaps, PVCs, ServiceAccounts, imagePullSecrets).
+    - **Label Selectors** (Service → Pod, NetworkPolicy → Pod, PodDisruptionBudget → Pod).
+    - **Ingress** routes (Ingress → Service → TLS Secret).
+    - **HPA** scale targets (HPA → Deployment).
+  - Each edge is annotated with a **reason** (e.g., `ownerRef`, `secretRef`, `selector`) to clarify how resources are connected.
+
 - **Graph Generation**  
-  Output graphs (e.g., DOT files) for visualization with Graphviz.
-- **Modern CLI with Cobra & Viper**  
-  Built using Cobra for command management and Viper for configuration, ensuring a flexible, user-friendly interface.
+  - Output graphs in [DOT format](https://graphviz.org/) for visualization with Graphviz or other tools.
+  - Edges are automatically labeled with the reference reason, making the graph easy to interpret.
+
+- **Cobra & Viper CLI**  
+  - Built with [Cobra](https://github.com/spf13/cobra) for intuitive subcommands and flags.
+  - Uses [Viper](https://github.com/spf13/viper) for flexible configuration (e.g., reading from config files or environment variables).
+
 - **Containerized Deployment**  
-  Includes a Dockerfile and docker-compose configuration for building and running the application in a containerized environment.
+  - Dockerfile and docker-compose configuration for building and running Cartographer in a containerized environment.
+  - Make targets for multi-platform builds (e.g., Linux, Mac ARM).
 
 ## Installation
 
 ### Prerequisites
 
-- Go 1.23+ (ensure modules are enabled)
-- Helm (if using Helm chart ingestion)
-- Docker (for containerized builds)
-- Docker Compose (optional, for multi-container setups)
+- **Go 1.23+** (modules enabled)
+- **Helm** (if using Helm chart ingestion)
+- **Docker** (for containerized builds)
+- **Docker Compose** (optional, for multi-container setups)
+- **Graphviz** (to visualize DOT output, installed via `brew install graphviz` on macOS or your preferred package manager)
 
 ### Clone the Repository
 
@@ -35,82 +53,106 @@ cd cartographer
 ```
 
 ### Install Dependencies
-Cartographer uses Go modules. From the repository root, run:
+Cartographer uses Go modules. From the repository root:
 
 ```bash
-go mod tidy
+make deps
 ```
+This fetches all necessary dependencies, including:
 
-This command downloads all necessary dependencies, including:
-- Cobra
-- Viper
-- Helm SDK (for chart rendering)
-- Kubernetes API packages for manifest conversion
+Cobra & Viper for CLI and config
+Helm SDK for chart rendering
+Kubernetes API packages for unstructured manifest parsing
 
+### Update Dependencies
+Cartographer uses Go modules. From the repository root:
 
-## Usage
-Cartographer provides a flexible CLI with several subcommands. Examples include:
+```bash
+make update-deps
+```
+This fetches updates all dependencies to the latest version
 
-### Analyze Kubernetes Manifests from YAML
+### Usage
+Cartographer offers a flexible CLI with subcommands. Here are a few examples:
+
+#### 1. Analyze Kubernetes Manifests from YAML
+
 ```bash
 cartographer analyze --input /path/to/manifest.yaml
 ```
+Cartographer reads the YAML, parses each document into Kubernetes unstructured objects, and builds a dependency graph
 
-### Analyze a Helm Chart
-Render a Helm chart by specifying its path and (optionally) the repository URL:
+#### 2. Analyze a Local Helm Chart
 
 ```bash
-cartographer analyze --chart /path/to/chart --repo https://charts.example.com
+cartographer analyze --chart /path/to/chart --release my-release --values values.yaml
+```
+The CLI will use the Helm SDK to render the chart and then process the resulting YAML for dependencies.
+
+#### 3. Analyze a Remote Helm Chart (UNIMPLEMENTED)
+
+```bash
+cartographer analyze --chart bitnami/postgresql --repo https://charts.bitnami.com/bitnami --release my-db
 ```
 
-Common Flags:
+### Key Flags
+
 - `--input`: Path to a Kubernetes YAML file.
-- `--chart`: Path to a Helm chart directory.
-- `--repo`: (Optional) Helm chart repository URL.
-- `--config`: Custom configuration file (default is $HOME/.cartographer.yaml).
+- `--chart`: Local path or remote chart name (bitnami/postgresql).
+- `--repo`: Optional chart repository URL.
+- `--values`: Optional path to a Helm values file.
+- `--release`: Name for the Helm release (defaults to `cartographer-release`).
+- `--output-format=dot`: Generate DOT output to stdout or to a file with `--output-file`.
+- `--output-file`: Location to store the output DOT file
+- `--config`: (Optional) Path to a configuration file for advanced settings.
 
-When a Helm chart is specified, Cartographer uses the Helm SDK to render the chart into Kubernetes manifests, then processes them as usual.
-
-## Building
-To build the Cartographer executable, run:
-
-```bash
-go build -o cartographer .
-```
-
-Make sure you have a proper main.go in the project root (in package main) that calls your CLI command execution logic (for example, by calling cmd/cartographer.Execute()).
-
-## Docker & Docker Compose
-Cartographer can be containerized for easy deployment.
-
-### Build the Docker Image
+### Lint
 
 ```bash
-docker build -t cartographer:<your_tag> .
+make lint
 ```
+This runs golangci-lint with your configuration, ensuring consistent code style.
 
-### Run with Docker Compose
+### Unit Testing
 
 ```bash
-docker-compose up
+make test
 ```
+A coverage report is generated upon completion, with coverage typically above 80% due to thorough unit tests.
 
-## Testing
-
-Unit tests are provided for all functions. Run tests with:
-
+### Building
+To build Cartographer as a CLI executable:
 ```bash
-go test ./...
+make build
 ```
+The binary is placed in the build/ directory.
+
+### Docker & Docker Compose
+Cartographer can be containerized for easy deployment or CI/CD usage.
+
+#### Docker
+```bash
+make docker
+```
+Builds a Docker image (e.g., cartographer:latest). You can run it like so:
+```bash
+docker run --rm cartographer:latest analyze --input /manifests/test.yaml
+```
+
+#### Docker Compose
+```bash
+docker compose up
+```
+Runs Cartographer in a container, optionally alongside other services you define. An example docker-compose.yaml has been provided.
 
 ## Versioning
-
-Cartographer uses a dedicated VERSION file to manage its version. The version from this file is injected into the binary at build time via build arguments in the Dockerfile. Update the VERSION file to reflect new releases.
+Cartographer uses a `VERSION` file in the root directory. The Makefile reads this to inject version metadata at build time (e.g., `-ldflags -X main.Version=$(VERSION)`).
 
 ## Contributing
+Contributions are welcome! If you find a bug or have an improvement, feel free to:
 
-Contributions are welcome! Please open an issue or submit a pull request with your improvements or bug fixes.
+1. Open an issue describing your idea or problem.
+2. Submit a pull request with your changes and relevant tests.
 
 ## License
-
-This project is licensed under the Apache 2.0 License. See the LICENSE file for details.
+This project is licensed under the Apache 2.0 License. See the LICENSE file for full details.
