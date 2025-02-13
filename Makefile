@@ -12,10 +12,6 @@ all: deps lint test build
 
 deps:
 	@echo "Installing dependencies..."
-	@go get -u github.com/spf13/cobra@latest
-	@go get -u github.com/spf13/viper@latest
-	@go get -u k8s.io/apimachinery@latest
-	@go get -u sigs.k8s.io/yaml@latest
 	@go mod tidy
 	@echo "Dependencies installed."
 
