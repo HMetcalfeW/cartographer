@@ -13,6 +13,10 @@ import (
 	"github.com/HMetcalfeW/cartographer/pkg/parser"
 )
 
+const (
+	DEFAULT_NAMESPACE = "default"
+)
+
 // AnalyzeCmd represents the analyze subcommand.
 var AnalyzeCmd = &cobra.Command{
 	Use:   "analyze",
@@ -28,6 +32,8 @@ var AnalyzeCmd = &cobra.Command{
 		chartPath := viper.GetString("chart")
 		valuesFile := viper.GetString("values")
 		repoURL := viper.GetString("repo")
+		version := viper.GetString("version")
+		namespace := viper.GetString("namespace")
 		releaseName := viper.GetString("release")
 		outputFormat := viper.GetString("output-format")
 		outputFile := viper.GetString("output-file")
@@ -49,6 +55,10 @@ var AnalyzeCmd = &cobra.Command{
 			k8sManifests = string(data)
 		}
 
+		if namespace == "" {
+			namespace = DEFAULT_NAMESPACE
+		}
+
 		// If a chart reference is provided, render it using the Helm SDK.
 		if chartPath != "" {
 			logger = logger.WithFields(log.Fields{
@@ -56,9 +66,12 @@ var AnalyzeCmd = &cobra.Command{
 				"values":      valuesFile,
 				"repo":        repoURL,
 				"releaseName": releaseName,
+				"version":     version,
+				"namespace":   namespace,
 			})
 			logger.Info("Rendering Helm chart")
-			rendered, err := helm.RenderChart(chartPath, valuesFile, releaseName, repoURL)
+			rendered, err := helm.RenderChart(chartPath, valuesFile,
+				releaseName, repoURL, version, namespace)
 			if err != nil {
 				logger.WithError(err).Error("failed to render chart")
 				return err
@@ -131,6 +144,8 @@ func init() {
 	AnalyzeCmd.Flags().StringP("values", "v", "", "Path to a values file for the Helm chart")
 	AnalyzeCmd.Flags().StringP("repo", "r", "", "Helm chart repository URL (optional)")
 	AnalyzeCmd.Flags().StringP("release", "l", "cartographer-release", "Release name for the Helm chart")
+	AnalyzeCmd.Flags().String("version", "", "Chart version to pull (optional if remote charts specify a version)")
+	AnalyzeCmd.Flags().String("namespace", "", "Namespace to inject into the Helm rendered release")
 	AnalyzeCmd.Flags().String("output-format", "", "Output format (e.g. 'dot'). If empty, prints text dependencies.")
 	AnalyzeCmd.Flags().String("output-file", "", "Output file for the DOT data (if --output-format=dot). Prints to stdout by default.")
 
@@ -153,6 +168,14 @@ func init() {
 
 	if err := viper.BindPFlag("release", AnalyzeCmd.Flags().Lookup("release")); err != nil {
 		log.WithError(err).Fatal("failed to bind the flag `release`")
+	}
+
+	if err := viper.BindPFlag("version", AnalyzeCmd.Flags().Lookup("version")); err != nil {
+		log.WithError(err).Fatal("failed to bind the flag `version`")
+	}
+
+	if err := viper.BindPFlag("namespace", AnalyzeCmd.Flags().Lookup("namespace")); err != nil {
+		log.WithError(err).Fatal("failed to bind the flag `namespace`")
 	}
 
 	if err := viper.BindPFlag("output-format", AnalyzeCmd.Flags().Lookup("output-format")); err != nil {
