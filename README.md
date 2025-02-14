@@ -128,6 +128,19 @@ cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/postgresql
 dot -Tpng bitnami-postgresql.dot -o bitnami-postgresql.png
 ```
 
+### Example: Metallb Output
+
+```bash
+cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/metallb --output-file bitnami-metallb.dot 
+```
+
+```bash
+dot -Tpng bitnami-metallb.dot -o bitnami-metallb.png
+```
+
+#### DOT File Visualized with GraphViz
+![cart-gopher logo](assets/bitnami-metallb.png)
+
 ## Configuration
 The default location of cartographer's configuration file if the `--config` flag is undefined is `$HOME/.cartographer.yaml`
 
