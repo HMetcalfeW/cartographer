@@ -21,6 +21,10 @@ update-deps:
 	@go mod tidy
 	@echo "Finished Updating Dependencies."
 
+add-helm-repos:
+	@echo "Adding necessary Helm repos..."
+	@helm repo add bitnami https://charts.bitnami.com/bitnami
+	@echo "Finished Adding necessary Helm repos."
 
 clean:
 	@rm -rf $(BUILD_DIR)
@@ -30,7 +34,7 @@ lint:
 	@golangci-lint run
 	@echo "Linting complete."
 
-test:
+test: add-helm-repos
 	@echo "Running tests with coverage..."
 	@go test -coverprofile=coverage.out ./...
 	@go tool cover -func=coverage.out

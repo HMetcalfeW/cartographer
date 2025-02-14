@@ -36,7 +36,13 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 
 	dependencies := make(map[string][]Edge)
 
-	// 1. Process ownerReferences (Owner -> Child).
+	// 1. Create an empty slice for every resource upfront, so loners appear in the final map.
+	for _, obj := range objs {
+		parentKey := ResourceID(obj)
+		dependencies[parentKey] = []Edge{} // ensures each resource is present
+	}
+
+	// 2. Process ownerReferences (Owner -> Child).
 	for _, obj := range objs {
 		childID := ResourceID(obj)
 		for _, owner := range obj.GetOwnerReferences() {
@@ -52,7 +58,7 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 		}
 	}
 
-	// 2. Process label selectors in specific resource kinds.
+	// 3. Process label selectors for Service, NetworkPolicy, PodDisruptionBudget, etc.
 	for _, obj := range objs {
 		switch obj.GetKind() {
 		case "Service":
@@ -64,21 +70,21 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 		}
 	}
 
-	// 3. Ingress references (Ingress -> Services for rules, Ingress -> Secrets for TLS).
+	// 4. Ingress references (Ingress -> Services, Ingress -> Secrets for TLS)
 	for _, obj := range objs {
 		if obj.GetKind() == "Ingress" {
 			handleIngressReferences(obj, dependencies)
 		}
 	}
 
-	// 4. HorizontalPodAutoscaler references (HPA -> scaleTargetRef).
+	// 5. HorizontalPodAutoscaler references (HPA -> scaleTargetRef)
 	for _, obj := range objs {
 		if obj.GetKind() == "HorizontalPodAutoscaler" {
 			handleHPAReferences(obj, dependencies)
 		}
 	}
 
-	// 5. Pod spec references in Pods, Deployments, DaemonSets, etc.
+	// 6. Pod spec references in Pods, Deployments, DaemonSets, etc.
 	for _, obj := range objs {
 		if IsPodOrController(obj) {
 			podSpec, found, err := GetPodSpec(obj)
@@ -98,18 +104,29 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 			parentID := ResourceID(obj)
 			secrets, configMaps, pvcs, serviceAccounts := GatherPodSpecReferences(podSpec)
 
-			// Add edges for each discovered reference with an appropriate reason.
 			for _, child := range secrets {
-				dependencies[parentID] = append(dependencies[parentID], Edge{ChildID: child, Reason: "secretRef"})
+				dependencies[parentID] = append(dependencies[parentID], Edge{
+					ChildID: child,
+					Reason:  "secretRef",
+				})
 			}
 			for _, child := range configMaps {
-				dependencies[parentID] = append(dependencies[parentID], Edge{ChildID: child, Reason: "configMapRef"})
+				dependencies[parentID] = append(dependencies[parentID], Edge{
+					ChildID: child,
+					Reason:  "configMapRef",
+				})
 			}
 			for _, child := range pvcs {
-				dependencies[parentID] = append(dependencies[parentID], Edge{ChildID: child, Reason: "pvcRef"})
+				dependencies[parentID] = append(dependencies[parentID], Edge{
+					ChildID: child,
+					Reason:  "pvcRef",
+				})
 			}
 			for _, child := range serviceAccounts {
-				dependencies[parentID] = append(dependencies[parentID], Edge{ChildID: child, Reason: "serviceAccountName"})
+				dependencies[parentID] = append(dependencies[parentID], Edge{
+					ChildID: child,
+					Reason:  "serviceAccountName",
+				})
 			}
 		}
 	}
