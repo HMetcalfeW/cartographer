@@ -31,7 +31,6 @@ var AnalyzeCmd = &cobra.Command{
 		inputPath := viper.GetString("input")
 		chartPath := viper.GetString("chart")
 		valuesFile := viper.GetString("values")
-		repoURL := viper.GetString("repo")
 		version := viper.GetString("version")
 		namespace := viper.GetString("namespace")
 		releaseName := viper.GetString("release")
@@ -64,14 +63,13 @@ var AnalyzeCmd = &cobra.Command{
 			logger = logger.WithFields(log.Fields{
 				"chart":       chartPath,
 				"values":      valuesFile,
-				"repo":        repoURL,
 				"releaseName": releaseName,
 				"version":     version,
 				"namespace":   namespace,
 			})
-			logger.Info("Rendering Helm chart")
+			logger.Debug("Rendering Helm chart")
 			rendered, err := helm.RenderChart(chartPath, valuesFile,
-				releaseName, repoURL, version, namespace)
+				releaseName, version, namespace)
 			if err != nil {
 				logger.WithError(err).Error("failed to render chart")
 				return err
@@ -108,7 +106,7 @@ var AnalyzeCmd = &cobra.Command{
 			logger.WithError(err).Error("failed to parse YAML content in temp file")
 			return err
 		}
-		log.Infof("Parsed %d objects", len(objs))
+		log.Debugf("Parsed %d objects", len(objs))
 
 		// Build the dependency map.
 		deps := dependency.BuildDependencies(objs)
@@ -123,11 +121,11 @@ var AnalyzeCmd = &cobra.Command{
 				if err := os.WriteFile(outputFile, []byte(dotContent), 0644); err != nil {
 					return fmt.Errorf("failed to write DOT output: %w", err)
 				}
-				log.Infof("DOT file saved to %s", outputFile)
+				log.Debugf("DOT file saved to %s", outputFile)
 			}
 		} else {
 			// Default: just print dependencies in text form
-			log.Info("Dependencies:")
+			log.Debug("Dependencies:")
 			dependency.PrintDependencies(deps)
 		}
 
@@ -136,17 +134,16 @@ var AnalyzeCmd = &cobra.Command{
 }
 
 func init() {
-	log.WithField("func", "analyze.init").Info("initializing cartographer subcommand analyze")
+	log.WithField("func", "analyze.init").Debug("initializing cartographer subcommand analyze")
 
 	// Define flags for the analyze command.
 	AnalyzeCmd.Flags().StringP("input", "i", "", "Path to Kubernetes YAML file")
 	AnalyzeCmd.Flags().StringP("chart", "c", "", "Chart reference or local path to a Helm chart (e.g. bitnami/postgres)")
 	AnalyzeCmd.Flags().StringP("values", "v", "", "Path to a values file for the Helm chart")
-	AnalyzeCmd.Flags().StringP("repo", "r", "", "Helm chart repository URL (optional)")
 	AnalyzeCmd.Flags().StringP("release", "l", "cartographer-release", "Release name for the Helm chart")
 	AnalyzeCmd.Flags().String("version", "", "Chart version to pull (optional if remote charts specify a version)")
 	AnalyzeCmd.Flags().String("namespace", "", "Namespace to inject into the Helm rendered release")
-	AnalyzeCmd.Flags().String("output-format", "", "Output format (e.g. 'dot'). If empty, prints text dependencies.")
+	AnalyzeCmd.Flags().String("output-format", "dot", "Output format (e.g. 'dot' - also the default). If empty, prints text dependencies.")
 	AnalyzeCmd.Flags().String("output-file", "", "Output file for the DOT data (if --output-format=dot). Prints to stdout by default.")
 
 	// Bind flags with Viper.
@@ -160,10 +157,6 @@ func init() {
 
 	if err := viper.BindPFlag("values", AnalyzeCmd.Flags().Lookup("values")); err != nil {
 		log.WithError(err).Fatal("failed to bind the flag `values`")
-	}
-
-	if err := viper.BindPFlag("repo", AnalyzeCmd.Flags().Lookup("repo")); err != nil {
-		log.WithError(err).Fatal("failed to bind the flag `repo`")
 	}
 
 	if err := viper.BindPFlag("release", AnalyzeCmd.Flags().Lookup("release")); err != nil {

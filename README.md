@@ -2,7 +2,7 @@
 
 # Cartographer
 
-Cartographer is a lightweight CLI tool written in Go that analyzes and visualizes relationships between Kubernetes resources. It ingests Kubernetes manifests—either from YAML files or via the Helm SDK—and produces dependency graphs to help you understand and document your application's architecture.
+Cartographer is a lightweight CLI tool written in Go that analyzes and visualizes relationships between Kubernetes resources in a DOT file. It ingests Kubernetes manifests—either from YAML files or via the Helm SDK—and produces dependency graphs to help you understand and document your application's architecture. The DOT file output can be run through a visualizer like GraphViz.
 
 ## Features
 
@@ -12,7 +12,7 @@ Cartographer is a lightweight CLI tool written in Go that analyzes and visualize
 
 - **Helm Chart Support**  
   - Render and analyze Kubernetes manifests from Helm charts via the Helm SDK.
-  - Specify the chart path and repo URL similarly to Helm CLI usage (e.g., `--chart`, `--repo`, `--release`, `--values`).
+  - Specify the chart path similarly to Helm CLI usage (e.g., `--chart`, `--release`, `--values`).
 
 - **Dependency Analysis with Labeled Edges**  
   - Detect references such as:
@@ -73,38 +73,72 @@ make update-deps
 This fetches updates all dependencies to the latest version
 
 ### Usage
-Cartographer offers a flexible CLI with subcommands. Here are a few examples:
+Cartographer offers a flexible CLI with an analyze subcommand using the Helm SDK to render the chart and then process the resulting YAML for dependencies. Here are a few examples:
 
-#### 1. Analyze Kubernetes Manifests from YAML
-
-```bash
-cartographer analyze --input /path/to/manifest.yaml
-```
-Cartographer reads the YAML, parses each document into Kubernetes unstructured objects, and builds a dependency graph
-
-#### 2. Analyze a Local Helm Chart
-
-```bash
-cartographer analyze --chart /path/to/chart --release my-release --values values.yaml
-```
-The CLI will use the Helm SDK to render the chart and then process the resulting YAML for dependencies.
-
-#### 3. Analyze a Remote Helm Chart (UNIMPLEMENTED)
-
-```bash
-cartographer analyze --chart bitnami/postgresql --repo https://charts.bitnami.com/bitnami --release my-db
-```
-
-### Key Flags
+#### Key Flags
 
 - `--input`: Path to a Kubernetes YAML file.
 - `--chart`: Local path or remote chart name (bitnami/postgresql).
-- `--repo`: Optional chart repository URL.
 - `--values`: Optional path to a Helm values file.
 - `--release`: Name for the Helm release (defaults to `cartographer-release`).
 - `--output-format=dot`: Generate DOT output to stdout or to a file with `--output-file`.
 - `--output-file`: Location to store the output DOT file
 - `--config`: (Optional) Path to a configuration file for advanced settings.
+
+#### 1. Analyze Kubernetes Manifests from YAML
+
+```bash
+cartographer analyze --input /path/to/manifest.yaml --output-format dot --output-file test.dot
+```
+Cartographer reads the YAML, parses each document into Kubernetes unstructured objects. 
+
+#### 2. Analyze a Locally Downloaded Helm Chart
+
+```bash
+cartographer analyze --chart /path/to/chart --release my-release --values values.yaml --output-format dot --output-file test.dot
+```
+#### 3. Analyze a Helm Chart from a Local Helm Registry
+Note: the registry will need to be added to your local Helm index.
+
+```bash
+helm repo add bitnami https://charts.bitnami.com/bitnami
+cartographer analyze --chart bitnami/postgresql --release my-release --values values.yaml --version 16.4.8 --output-format dot --output-file test.dot
+```
+
+#### 4. Analyze a Remote Helm Chart from an OCI Registry
+
+```bash
+cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/postgresql --release my-db --version 16.4.8 --output-format dot --output-file test.dot
+```
+
+### Run Cartographer and Visualize the DOT File
+
+1. Ensure you have GraphViz installed
+```bash
+brew install graphviz
+```
+
+2. Run cartographer
+```bash
+cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/postgresql --release my-db --version 16.4.8 --output-format dot --output-file bitnami-postgresql.dot
+```
+
+3. Run GraphViz using the 
+```bash
+dot -Tpng bitnami-postgresql.dot -o bitnami-postgresql.png
+```
+
+## Configuration
+The default location of cartographer's configuration file if the `--config` flag is undefined is `$HOME/.cartographer.yaml`
+
+Right now the configuration supports changing the log level of the application. For example:
+
+```yaml
+log:
+  level: "debug"
+```
+
+## Repo Maintenance
 
 ### Lint
 

@@ -66,7 +66,6 @@ spec:
 		chartDir,          // chart path (local directory)
 		valuesFile.Name(), // values file
 		"test-release",    // release name
-		"",                // repoURL empty => use local chart
 		"",                // version empty
 		"default",         // namespace
 	)
@@ -80,15 +79,13 @@ func TestRenderChart_Remote(t *testing.T) {
 	tests := []struct {
 		name        string
 		chartRef    string // Either a bare chart name or a local alias (e.g., "bitnami/postgresql")
-		repoURL     string // If non-empty, must be used with a bare chart name.
 		version     string
 		expectError string // Substring expected in error (if any)
 		validate    func(rendered string, err error)
 	}{
 		{
 			name:     "DirectRepo_BareChart",
-			chartRef: "postgresql",
-			repoURL:  "https://charts.bitnami.com/bitnami",
+			chartRef: "oci://registry-1.docker.io/bitnamicharts/postgresql",
 			version:  "16.4.7",
 			validate: func(rendered string, err error) {
 				require.NoError(t, err, "expected direct repo fetch to succeed")
@@ -100,12 +97,11 @@ func TestRenderChart_Remote(t *testing.T) {
 		{
 			name:     "LocalAlias_Bitnami",
 			chartRef: "bitnami/postgresql",
-			repoURL:  "",
 			version:  "16.4.7",
 			validate: func(rendered string, err error) {
 				// If the local alias isn't set up or version mismatches, skip the test.
 				if err != nil {
-					if strings.Contains(err.Error(), "failed to pull chart") {
+					if strings.Contains(err.Error(), "failed to locate chart") {
 						t.Skipf("Skipping local alias test; alias not found or version mismatch: %v", err)
 					} else {
 						t.Fatalf("Unexpected error: %v", err)
@@ -117,24 +113,16 @@ func TestRenderChart_Remote(t *testing.T) {
 			},
 		},
 		{
-			name:        "Conflict_BitnamiPlusRepo",
-			chartRef:    "bitnami/postgresql",
-			repoURL:     "https://charts.bitnami.com/bitnami",
-			version:     "16.4.7",
-			expectError: "cannot specify --repo together with an alias",
-		},
-		{
 			name:        "LocalPath_NoSuchDir",
 			chartRef:    "./definitelyDoesNotExist",
-			repoURL:     "",
 			version:     "",
-			expectError: "failed to pull chart",
+			expectError: "failed to locate chart",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rendered, err := helm.RenderChart(tc.chartRef, "", "test-remote", tc.repoURL, tc.version, "default")
+			rendered, err := helm.RenderChart(tc.chartRef, "", "test-remote", tc.version, "default")
 			if tc.expectError != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tc.expectError)

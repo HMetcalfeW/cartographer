@@ -19,16 +19,16 @@ import (
 )
 
 // initActionConfig initializes an action.Configuration using the provided Helm environment settings.
-// This function is similar to what the Helm CLI uses.
 func initActionConfig(settings *cli.EnvSettings) (*action.Configuration, error) {
 	actionConfig := new(action.Configuration)
-	// Use the default RESTClientGetter and the HELM_DRIVER from the environment.
+	// Use the default RESTClientGetter and HELM_DRIVER environment variable.
 	if err := actionConfig.Init(settings.RESTClientGetter(), settings.Namespace(), os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
 		return nil, err
 	}
 	return actionConfig, nil
 }
 
+// newRegistryClient creates a new registry.Client using the provided settings.
 func newRegistryClient(settings *cli.EnvSettings, plainHTTP bool) (*registry.Client, error) {
 	opts := []registry.ClientOption{
 		registry.ClientOptDebug(settings.Debug),
@@ -39,29 +39,22 @@ func newRegistryClient(settings *cli.EnvSettings, plainHTTP bool) (*registry.Cli
 	if plainHTTP {
 		opts = append(opts, registry.ClientOptPlainHTTP())
 	}
-
-	// Create a new registry client
-	registryClient, err := registry.NewClient(opts...)
-	if err != nil {
-		return nil, err
-	}
-	return registryClient, nil
+	return registry.NewClient(opts...)
 }
 
 // RenderChart pulls (or locates) a Helm chart, updates its dependencies if needed,
-// merges user-provided values, and renders the chart templates. It returns a combined
-// multi-document YAML string (only .yaml/.yml files).
+// merges user-provided values, and renders the chart templates.
+// It returns a combined multi-document YAML string (only .yaml/.yml files).
 //
 // chartRef can be one of:
 //  1. A local directory (with a Chart.yaml),
 //  2. A local archive (*.tgz),
-//  3. A local alias (e.g. "bitnami/postgresql") – in which case your local Helm repo index is used,
+//  3. A local alias (e.g. "bitnami/keycloak") – in which case your local Helm repo index is used,
 //  4. A bare chart name for remote pulls (when --repo is provided).
 func RenderChart(
 	chartRef string, // chart reference
 	valuesFile string, // optional path to values file
 	releaseName string, // release name to inject
-	repoURL string, // optional repository URL; if provided, chartRef should be bare (e.g. "postgresql")
 	version string, // optional chart version
 	namespace string, // namespace for rendering
 ) (string, error) {
@@ -71,7 +64,6 @@ func RenderChart(
 		"chartRef":    chartRef,
 		"valuesFile":  valuesFile,
 		"releaseName": releaseName,
-		"repoURL":     repoURL,
 		"version":     version,
 		"namespace":   namespace,
 	})
@@ -92,59 +84,95 @@ func RenderChart(
 		logger.Infof("Using local chart from disk: %s", localPath)
 		chartRef = localPath
 	} else {
-		// Otherwise, use the Helm pull action.
-		// If repoURL is provided, we expect chartRef to be a bare chart name.
-		// If repoURL is empty, the pull action will use local repo alias information.
-		if repoURL != "" && strings.Contains(chartRef, "/") {
-			return "", fmt.Errorf("cannot specify --repo together with an alias/prefix in chartRef (%q). Use either `--chart postgresql --repo <repo>` or `--chart bitnami/postgresql` alone", chartRef)
+		// check to see if the chartRef is an OCI path
+		if !registry.IsOCI(chartRef) {
+			var cpo action.ChartPathOptions
+			cpo.Version = version
+			resolved, err := cpo.LocateChart(chartRef, settings)
+			if err != nil {
+				logger.WithError(err).Error("failed to locate chart using local repo alias")
+				return "", fmt.Errorf("failed to locate chart: %w", err)
+			}
+			chartRef = resolved
+			logger.Infof("Chart located at: %s", chartRef)
+
+		} else {
+			// Initialize action configuration.
+			actionConfig, err := initActionConfig(settings)
+			if err != nil {
+				logger.WithError(err).Error("failed to initialize action configuration")
+				return "", err
+			}
+
+			registryClient, err := newRegistryClient(settings, false)
+			if err != nil {
+				logger.WithError(err).Error("failed to create registry client")
+				return "", err
+			}
+			actionConfig.RegistryClient = registryClient
+
+			// Create pull options using the action configuration.
+			pullOpts := action.WithConfig(actionConfig)
+			// Create a new Pull client with the pull options.
+			pullClient := action.NewPullWithOpts(pullOpts)
+
+			// Set Settings so that the pull client has access to the CLI environment.
+			pullClient.Settings = settings
+
+			// Set destination and chart path options.
+			pullClient.DestDir = os.TempDir()
+			pullClient.Version = version
+			pullClient.Verify = false
+
+			// Use the Pull client to resolve (and pull) the chart.
+			addlInfo, pullErr := pullClient.Run(chartRef)
+			if pullErr != nil {
+				logger.WithError(pullErr).WithField("addInfo", addlInfo).Error("failed to pull chart using Helm pull action")
+				return "", fmt.Errorf("failed to pull chart: %w", pullErr)
+			}
+
+			/**
+			* Sadly the Helm SDK's pull function does not return a string of where it actually saved
+			* the Helm chart. Looking at the pull.go reference, work would need to be done to preserve
+			* this variable within the Run function so folks don't need to rewrite. Below is a workaround
+			**/
+
+			// Infer the chart name from the chartRef
+			chartName, err := inferChartName(chartRef)
+			if err != nil {
+				return "", err
+			}
+
+			// Determine the expected file name using glob patterns
+			var pattern string
+			if version != "" {
+				// When a version is specified, expect an exact match
+				pattern = fmt.Sprintf("%s-%s.tgz", chartName, version)
+			} else {
+				// Otherwise, match any file that starts with the chart name
+				pattern = fmt.Sprintf("%s*.tgz", chartName)
+			}
+
+			// Search for the chart file
+			matches, err := filepath.Glob(filepath.Join(os.TempDir(), pattern))
+			if err != nil {
+				return "", err
+			}
+			if len(matches) == 0 {
+				return "", fmt.Errorf("no chart file found matching pattern: %s", pattern)
+			}
+
+			// use the first match
+			chartRef = matches[0]
+			logger.Infof("Chart pulled to: %s", chartRef)
 		}
-
-		// Initialize action configuration.
-		actionConfig, err := initActionConfig(settings)
-		if err != nil {
-			logger.WithError(err).Error("failed to initialize action configuration")
-			return "", err
-		}
-
-		registryClient, err := newRegistryClient(settings, false)
-		if err != nil {
-			logger.WithError(err).Error("failed to create registry client")
-			return "", err
-		}
-		actionConfig.RegistryClient = registryClient
-
-		// Create the Helm SDK pull options
-		pullOpts := action.WithConfig(actionConfig)
-
-		// Create a new Pull client with the pull options
-		pullClient := action.NewPullWithOpts(pullOpts)
-
-		// IMPORTANT: set the Settings field so that the pull action can read the local repo index.
-		pullClient.Settings = settings
-
-		// Set destination via embedded ChartPathOptions.
-		pullClient.DestDir = os.TempDir()
-		pullClient.ChartPathOptions.RepoURL = repoURL
-		pullClient.ChartPathOptions.Version = version
-
-		// Set verification flag as false.
-		pullClient.Verify = false
-
-		// Use the Pull client to resolve (and pull) the chart.
-		resolved, pullErr := pullClient.Run(chartRef)
-		if pullErr != nil {
-			logger.WithError(pullErr).Error("failed to pull chart using Helm pull action")
-			return "", pullErr
-		}
-		chartRef = resolved
-		logger.Infof("Chart pulled to: %s", chartRef)
 	}
 
 	// Load the chart from the resolved path.
 	ch, err := loader.Load(chartRef)
 	if err != nil {
 		logger.WithError(err).Error("failed to load chart")
-		return "", err
+		return "", fmt.Errorf("failed to load chart: %w", err)
 	}
 
 	// Check and update chart dependencies if necessary.
@@ -162,12 +190,12 @@ func RenderChart(
 				Debug:            settings.Debug,
 			}
 			if err := manager.Update(); err != nil {
-				return "", err
+				return "", fmt.Errorf("failed to update chart dependencies: %w", err)
 			}
 			// Reload the chart after dependency update.
 			ch, err = loader.Load(chartRef)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("failed to reload chart after dependency update: %w", err)
 			}
 		}
 	}
@@ -234,4 +262,15 @@ func pathExists(p string) bool {
 	}
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+// inferChartName attempts to resolve the name of a Helm chart based on the chartRef passed to Render
+// the last token of a chartRef is the chart. For example, in oci://registry-1.docker.io/bitnamicharts/keycloak
+// keycloak is the Chart's name
+func inferChartName(chartRef string) (string, error) {
+	parts := strings.Split(chartRef, "/")
+	if len(parts) == 0 {
+		return "", fmt.Errorf("invalid chart reference: %s", chartRef)
+	}
+	return parts[len(parts)-1], nil
 }
