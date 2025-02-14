@@ -12,7 +12,7 @@ Cartographer is a lightweight CLI tool written in Go that analyzes and visualize
 
 - **Helm Chart Support**  
   - Render and analyze Kubernetes manifests from Helm charts via the Helm SDK.
-  - Specify the chart path similarly to Helm CLI usage (e.g., `--chart`, `--release`, `--values`).
+  - Specify the chart path similarly to Helm CLI usage (e.g., `--chart`, `--release`, `--values`, `--version`).
 
 - **Dependency Analysis with Labeled Edges**  
   - Detect references such as:
@@ -81,6 +81,7 @@ Cartographer offers a flexible CLI with an analyze subcommand using the Helm SDK
 - `--chart`: Local path or remote chart name (bitnami/postgresql).
 - `--values`: Optional path to a Helm values file.
 - `--release`: Name for the Helm release (defaults to `cartographer-release`).
+- `--version`: The Helm Chart version you wish to use.
 - `--output-format=dot`: Generate DOT output to stdout or to a file with `--output-file`.
 - `--output-file`: Location to store the output DOT file
 - `--config`: (Optional) Path to a configuration file for advanced settings.
