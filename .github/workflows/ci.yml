@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [1.23]
+        go-version: [1.24]
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -23,12 +23,10 @@ jobs:
 
       - name: Install golangci-lint
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v1.63.4
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v2.16
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4.2.0
-        with:
-          version: '3.16.4' # default is latest (stable)
+        uses: azure/setup-helm@v4.3.0
         id: install
         
       - name: Lint
