@@ -91,7 +91,7 @@ func RenderChart(
 			resolved, err := cpo.LocateChart(chartRef, settings)
 			if err != nil {
 				logger.WithError(err).Error("failed to locate chart using local repo alias")
-				return "", fmt.Errorf("failed to locate chart: %w", err)
+				return "", fmt.Errorf("error: Helm chart '%s' could not be found. Ensure the Helm repository is added and the chart name is spelled correctly. If it's a local path, confirm the directory exists: %w", chartRef, err)
 			}
 			chartRef = resolved
 			logger.Infof("Chart located at: %s", chartRef)
@@ -128,7 +128,7 @@ func RenderChart(
 			addlInfo, pullErr := pullClient.Run(chartRef)
 			if pullErr != nil {
 				logger.WithError(pullErr).WithField("addInfo", addlInfo).Error("failed to pull chart using Helm pull action")
-				return "", fmt.Errorf("failed to pull chart: %w", pullErr)
+				return "", fmt.Errorf("error: Failed to pull OCI chart '%s'. Please check the chart reference, registry availability, and your authentication: %w", chartRef, pullErr)
 			}
 
 			/**
@@ -172,7 +172,7 @@ func RenderChart(
 	ch, err := loader.Load(chartRef)
 	if err != nil {
 		logger.WithError(err).Error("failed to load chart")
-		return "", fmt.Errorf("failed to load chart: %w", err)
+		return "", fmt.Errorf("error: Failed to load Helm chart from '%s'. This might indicate a corrupted chart or an invalid chart format: %w", chartRef, err)
 	}
 
 	// Check and update chart dependencies if necessary.
@@ -206,7 +206,10 @@ func RenderChart(
 		data, err := os.ReadFile(valuesFile)
 		if err != nil {
 			logger.WithError(err).Error("failed to read values file")
-			return "", err
+			if os.IsNotExist(err) {
+				return "", fmt.Errorf("error: Values file not found at '%s'. Please verify the file path and ensure it exists: %w", valuesFile, err)
+			}
+			return "", fmt.Errorf("failed to read values file '%s': %w", valuesFile, err)
 		}
 		if err := yaml.Unmarshal(data, &userValues); err != nil {
 			logger.WithError(err).Error("failed to unmarshal values file")

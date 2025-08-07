@@ -49,7 +49,10 @@ var AnalyzeCmd = &cobra.Command{
 		if inputPath != "" {
 			data, err := os.ReadFile(inputPath)
 			if err != nil {
-				return fmt.Errorf("failed to read input file: %w", err)
+				if os.IsNotExist(err) {
+					return fmt.Errorf("error: Kubernetes manifest not found at '%s'. Please verify the file path and ensure it exists: %w", inputPath, err)
+				}
+				return fmt.Errorf("failed to read input file '%s': %w", inputPath, err)
 			}
 			k8sManifests = string(data)
 		}
