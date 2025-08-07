@@ -138,7 +138,7 @@ func init() {
 
 	// Define flags for the analyze command.
 	AnalyzeCmd.Flags().StringP("input", "i", "", "Path to Kubernetes YAML file")
-	AnalyzeCmd.Flags().StringP("chart", "c", "", "Chart reference or local path to a Helm chart (e.g. bitnami/postgres)")
+	AnalyzeCmd.Flags().StringP("chart", "c", "", "Chart reference or local path to a Helm chart (e.g. example/chart)")
 	AnalyzeCmd.Flags().StringP("values", "v", "", "Path to a values file for the Helm chart")
 	AnalyzeCmd.Flags().StringP("release", "l", "cartographer-release", "Release name for the Helm chart")
 	AnalyzeCmd.Flags().String("version", "", "Chart version to pull (optional if remote charts specify a version)")

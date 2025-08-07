@@ -112,6 +112,24 @@ cartographer analyze --chart bitnami/postgresql --release my-release --values va
 cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/postgresql --release my-db --version 16.4.8 --output-format dot --output-file test.dot
 ```
 
+### Important Note on Bitnami Catalog Changes
+
+As of August 28, 2025, Bitnami is making significant changes to its public container catalog. This may impact how Cartographer interacts with Bitnami Helm charts and images.
+
+-   Most existing images will be moved to a `bitnamilegacy` repository and will no longer receive updates.
+-   A limited set of hardened images will remain free for development under the "latest" tag.
+-   For production use, Bitnami Secure Images will be a paid offering.
+
+What this means for Cartographer users:
+
+-   If you are using Bitnami charts, you may need to update your chart references to point to the new `bitnamilegacy` repository or consider using the paid Bitnami Secure Images for continued support and updates.
+-   Alternatively, explore non-Bitnami chart sources or maintain your own chart repositories.
+
+Please refer to the official Bitnami announcement for detailed information:
+https://github.com/bitnami/containers/issues/83267
+
+
+
 ### Run Cartographer and Visualize the DOT File
 
 1. Ensure you have GraphViz installed

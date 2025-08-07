@@ -49,7 +49,7 @@ func newRegistryClient(settings *cli.EnvSettings, plainHTTP bool) (*registry.Cli
 // chartRef can be one of:
 //  1. A local directory (with a Chart.yaml),
 //  2. A local archive (*.tgz),
-//  3. A local alias (e.g. "bitnami/keycloak") – in which case your local Helm repo index is used,
+//  //  3. A local alias (e.g. "myrepo/mychart") – in which case your local Helm repo index is used,
 //  4. A bare chart name for remote pulls (when --repo is provided).
 func RenderChart(
 	chartRef string, // chart reference
@@ -265,7 +265,7 @@ func pathExists(p string) bool {
 }
 
 // inferChartName attempts to resolve the name of a Helm chart based on the chartRef passed to Render
-// the last token of a chartRef is the chart. For example, in oci://registry-1.docker.io/bitnamicharts/keycloak
+// the last token of a chartRef is the chart. For example, in oci://registry-1.docker.io/mycharts/mychart
 // keycloak is the Chart's name
 func inferChartName(chartRef string) (string, error) {
 	parts := strings.Split(chartRef, "/")

@@ -78,14 +78,14 @@ spec:
 func TestRenderChart_Remote(t *testing.T) {
 	tests := []struct {
 		name        string
-		chartRef    string // Either a bare chart name or a local alias (e.g., "bitnami/postgresql")
+		chartRef    string // Either a bare chart name or a local alias (e.g., "myrepo/mychart")
 		version     string
 		expectError string // Substring expected in error (if any)
 		validate    func(rendered string, err error)
 	}{
 		{
 			name:     "DirectRepo_BareChart",
-			chartRef: "oci://registry-1.docker.io/bitnamicharts/postgresql",
+			chartRef: "oci://registry-1.docker.io/mycharts/mychart",
 			version:  "16.4.7",
 			validate: func(rendered string, err error) {
 				require.NoError(t, err, "expected direct repo fetch to succeed")
@@ -96,7 +96,7 @@ func TestRenderChart_Remote(t *testing.T) {
 		},
 		{
 			name:     "LocalAlias_Bitnami",
-			chartRef: "bitnami/postgresql",
+			chartRef: "myrepo/mychart",
 			version:  "16.4.7",
 			validate: func(rendered string, err error) {
 				// If the local alias isn't set up or version mismatches, skip the test.
