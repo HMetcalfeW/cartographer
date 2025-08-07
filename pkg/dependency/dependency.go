@@ -19,6 +19,30 @@ type Edge struct {
 	Reason string
 }
 
+// Analyzer defines the interface for a dependency analysis component.
+type Analyzer interface {
+	Analyze(obj *unstructured.Unstructured, allObjs []*unstructured.Unstructured, dependencies map[string][]Edge)
+}
+
+// OwnerRefAnalyzer analyzes owner references.
+type OwnerRefAnalyzer struct{}
+
+// Analyze processes owner references for a given object.
+func (a *OwnerRefAnalyzer) Analyze(obj *unstructured.Unstructured, _ []*unstructured.Unstructured, dependencies map[string][]Edge) {
+	childID := ResourceID(obj)
+	for _, owner := range obj.GetOwnerReferences() {
+		ownerID := fmt.Sprintf("%s/%s", owner.Kind, owner.Name)
+		edge := Edge{ChildID: childID, Reason: "ownerRef"}
+		dependencies[ownerID] = append(dependencies[ownerID], edge)
+
+		log.WithFields(log.Fields{
+			"func":    "OwnerRefAnalyzer.Analyze",
+			"ownerID": ownerID,
+			"childID": childID,
+		}).Debug("Added owner->child dependency")
+	}
+}
+
 // BuildDependencies analyzes a slice of unstructured Kubernetes objects and
 // identifies their interdependencies. It returns a map where each key is a
 // "parent" resource identifier ("Kind/Name"), and each value is a slice of
@@ -42,92 +66,19 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 		dependencies[parentKey] = []Edge{} // ensures each resource is present
 	}
 
-	// 2. Process ownerReferences (Owner -> Child).
-	for _, obj := range objs {
-		childID := ResourceID(obj)
-		for _, owner := range obj.GetOwnerReferences() {
-			ownerID := fmt.Sprintf("%s/%s", owner.Kind, owner.Name)
-			edge := Edge{ChildID: childID, Reason: "ownerRef"}
-			dependencies[ownerID] = append(dependencies[ownerID], edge)
-
-			log.WithFields(log.Fields{
-				"func":    "BuildDependencies",
-				"ownerID": ownerID,
-				"childID": childID,
-			}).Debug("Added owner->child dependency")
-		}
+	// Define the order of analyzers.
+	analyzers := []Analyzer{
+		&OwnerRefAnalyzer{},
+		&LabelSelectorAnalyzer{},
+		&IngressAnalyzer{},
+		&HPAAnalyzer{},
+		&PodSpecAnalyzer{},
 	}
 
-	// 3. Process label selectors for Service, NetworkPolicy, PodDisruptionBudget, etc.
-	for _, obj := range objs {
-		switch obj.GetKind() {
-		case "Service":
-			handleServiceLabelSelector(obj, objs, dependencies)
-		case "NetworkPolicy":
-			handleNetworkPolicy(obj, objs, dependencies)
-		case "PodDisruptionBudget":
-			handlePodDisruptionBudget(obj, objs, dependencies)
-		}
-	}
-
-	// 4. Ingress references (Ingress -> Services, Ingress -> Secrets for TLS)
-	for _, obj := range objs {
-		if obj.GetKind() == "Ingress" {
-			handleIngressReferences(obj, dependencies)
-		}
-	}
-
-	// 5. HorizontalPodAutoscaler references (HPA -> scaleTargetRef)
-	for _, obj := range objs {
-		if obj.GetKind() == "HorizontalPodAutoscaler" {
-			handleHPAReferences(obj, dependencies)
-		}
-	}
-
-	// 6. Pod spec references in Pods, Deployments, DaemonSets, etc.
-	for _, obj := range objs {
-		if IsPodOrController(obj) {
-			podSpec, found, err := GetPodSpec(obj)
-			if err != nil {
-				log.WithFields(log.Fields{
-					"func":  "BuildDependencies",
-					"error": err,
-					"kind":  obj.GetKind(),
-					"name":  obj.GetName(),
-				}).Warn("Error retrieving podSpec")
-				continue
-			}
-			if !found || podSpec == nil {
-				continue
-			}
-
-			parentID := ResourceID(obj)
-			secrets, configMaps, pvcs, serviceAccounts := GatherPodSpecReferences(podSpec)
-
-			for _, child := range secrets {
-				dependencies[parentID] = append(dependencies[parentID], Edge{
-					ChildID: child,
-					Reason:  "secretRef",
-				})
-			}
-			for _, child := range configMaps {
-				dependencies[parentID] = append(dependencies[parentID], Edge{
-					ChildID: child,
-					Reason:  "configMapRef",
-				})
-			}
-			for _, child := range pvcs {
-				dependencies[parentID] = append(dependencies[parentID], Edge{
-					ChildID: child,
-					Reason:  "pvcRef",
-				})
-			}
-			for _, child := range serviceAccounts {
-				dependencies[parentID] = append(dependencies[parentID], Edge{
-					ChildID: child,
-					Reason:  "serviceAccountName",
-				})
-			}
+	// Run each analyzer.
+	for _, analyzer := range analyzers {
+		for _, obj := range objs {
+			analyzer.Analyze(obj, objs, dependencies)
 		}
 	}
 
@@ -231,6 +182,56 @@ func GetPodSpec(obj *unstructured.Unstructured) (map[string]interface{}, bool, e
 		return unstructured.NestedMap(obj.Object, "spec", "jobTemplate", "spec", "template", "spec")
 	default:
 		return nil, false, fmt.Errorf("kind %s does not have a standard pod template", obj.GetKind())
+	}
+}
+
+// PodSpecAnalyzer analyzes Pod spec references.
+type PodSpecAnalyzer struct{}
+
+// Analyze processes Pod spec references for a given object.
+func (a *PodSpecAnalyzer) Analyze(obj *unstructured.Unstructured, _ []*unstructured.Unstructured, dependencies map[string][]Edge) {
+	if IsPodOrController(obj) {
+		podSpec, found, err := GetPodSpec(obj)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"func":  "PodSpecAnalyzer.Analyze",
+				"error": err,
+				"kind":  obj.GetKind(),
+				"name":  obj.GetName(),
+			}).Warn("Error retrieving podSpec")
+			return
+		}
+		if !found || podSpec == nil {
+			return
+		}
+
+		parentID := ResourceID(obj)
+		secrets, configMaps, pvcs, serviceAccounts := GatherPodSpecReferences(podSpec)
+
+		for _, child := range secrets {
+			dependencies[parentID] = append(dependencies[parentID], Edge{
+				ChildID: child,
+				Reason:  "secretRef",
+			})
+		}
+		for _, child := range configMaps {
+			dependencies[parentID] = append(dependencies[parentID], Edge{
+				ChildID: child,
+				Reason:  "configMapRef",
+			})
+		}
+		for _, child := range pvcs {
+			dependencies[parentID] = append(dependencies[parentID], Edge{
+				ChildID: child,
+				Reason:  "pvcRef",
+			})
+		}
+		for _, child := range serviceAccounts {
+			dependencies[parentID] = append(dependencies[parentID], Edge{
+				ChildID: child,
+				Reason:  "serviceAccountName",
+			})
+		}
 	}
 }
 
@@ -341,12 +342,24 @@ func ParseEnvFrom(envFrom map[string]interface{}, secretRefs, configMapRefs *[]s
 	}
 }
 
-// Below are unexported handlers used internally by BuildDependencies
-// to interpret references for Services, NetworkPolicies, Ingresses, etc.
+// LabelSelectorAnalyzer analyzes label selectors for Services, NetworkPolicies, and PodDisruptionBudgets.
+type LabelSelectorAnalyzer struct{}
+
+// Analyze processes label selectors for a given object.
+func (a *LabelSelectorAnalyzer) Analyze(obj *unstructured.Unstructured, allObjs []*unstructured.Unstructured, dependencies map[string][]Edge) {
+	switch obj.GetKind() {
+	case "Service":
+		a.handleServiceLabelSelector(obj, allObjs, dependencies)
+	case "NetworkPolicy":
+		a.handleNetworkPolicy(obj, allObjs, dependencies)
+	case "PodDisruptionBudget":
+		a.handlePodDisruptionBudget(obj, allObjs, dependencies)
+	}
+}
 
 // handleServiceLabelSelector finds Pods or higher-level controllers whose labels match
 // the Service's .spec.selector, and records each matching resource as a child with Reason="selector".
-func handleServiceLabelSelector(
+func (a *LabelSelectorAnalyzer) handleServiceLabelSelector(
 	svc *unstructured.Unstructured,
 	allObjs []*unstructured.Unstructured,
 	deps map[string][]Edge,
@@ -381,7 +394,7 @@ func handleServiceLabelSelector(
 
 // handleNetworkPolicy finds Pods or controllers whose labels match
 // .spec.podSelector.matchLabels, and records each link as Reason="podSelector".
-func handleNetworkPolicy(
+func (a *LabelSelectorAnalyzer) handleNetworkPolicy(
 	np *unstructured.Unstructured,
 	allObjs []*unstructured.Unstructured,
 	deps map[string][]Edge,
@@ -415,7 +428,7 @@ func handleNetworkPolicy(
 
 // handlePodDisruptionBudget processes .spec.selector.matchLabels to find
 // target objects (Pods, controllers) and creates an edge with Reason="pdbSelector".
-func handlePodDisruptionBudget(
+func (a *LabelSelectorAnalyzer) handlePodDisruptionBudget(
 	pdb *unstructured.Unstructured,
 	allObjs []*unstructured.Unstructured,
 	deps map[string][]Edge,
@@ -447,10 +460,20 @@ func handlePodDisruptionBudget(
 	}
 }
 
+// IngressAnalyzer analyzes Ingress references.
+type IngressAnalyzer struct{}
+
+// Analyze processes Ingress references for a given object.
+func (a *IngressAnalyzer) Analyze(obj *unstructured.Unstructured, _ []*unstructured.Unstructured, dependencies map[string][]Edge) {
+	if obj.GetKind() == "Ingress" {
+		a.handleIngressReferences(obj, dependencies)
+	}
+}
+
 // handleIngressReferences inspects an Ingress's .spec.rules[].http.paths[].backend
 // (both newer and older styles) and .spec.tls[].secretName, creating edges with
 // Reason="ingressBackend" or Reason="tlsSecret", respectively.
-func handleIngressReferences(
+func (a *IngressAnalyzer) handleIngressReferences(
 	ingress *unstructured.Unstructured,
 	deps map[string][]Edge,
 ) {
@@ -520,9 +543,19 @@ func handleIngressReferences(
 	}
 }
 
+// HPAAnalyzer analyzes HorizontalPodAutoscaler references.
+type HPAAnalyzer struct{}
+
+// Analyze processes HPA references for a given object.
+func (a *HPAAnalyzer) Analyze(obj *unstructured.Unstructured, _ []*unstructured.Unstructured, dependencies map[string][]Edge) {
+	if obj.GetKind() == "HorizontalPodAutoscaler" {
+		a.handleHPAReferences(obj, dependencies)
+	}
+}
+
 // handleHPAReferences checks .spec.scaleTargetRef for HPA objects, creating an
 // edge with Reason="scaleTargetRef".
-func handleHPAReferences(
+func (a *HPAAnalyzer) handleHPAReferences(
 	hpa *unstructured.Unstructured,
 	deps map[string][]Edge,
 ) {
