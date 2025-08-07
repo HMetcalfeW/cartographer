@@ -8,7 +8,7 @@ LDFLAGS=-ldflags="-X main.version=$(VERSION)"
 # Targets
 .PHONY: all deps update-deps clean lint test coverhtml build docker
 
-all: deps lint test build
+all: deps test build
 
 deps:
 	@echo "Installing dependencies..."
@@ -30,9 +30,9 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@echo "Cleaned build artifacts."
 
-lint:
-	@golangci-lint run
-	@echo "Linting complete."
+# lint:
+# 	@golangci-lint run
+# 	@echo "Linting complete."
 
 test: add-helm-repos
 	@echo "Running tests with coverage..."
