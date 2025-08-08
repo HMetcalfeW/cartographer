@@ -24,7 +24,8 @@ Cartographer is a lightweight CLI tool written in Go that analyzes and visualize
   - Each edge is annotated with a **reason** (e.g., `ownerRef`, `secretRef`, `selector`) to clarify how resources are connected.
 
 - **Graph Generation**  
-  - Output graphs in [DOT format](https://graphviz.org/) for visualization with Graphviz or other tools.
+  - Output graphs in [DOT format](https://graphviz.org/) for visualization with Graphviz or other tools.  
+    Example DOT snippet: `A -> B [label="uses"];`
   - Edges are automatically labeled with the reference reason, making the graph easy to interpret.
 
 - **Cobra & Viper CLI**  
@@ -64,6 +65,54 @@ Cobra & Viper for CLI and config
 Helm SDK for chart rendering
 Kubernetes API packages for unstructured manifest parsing
 
+### Getting Started
+
+To quickly get Cartographer up and running and visualize your first Kubernetes manifest:
+
+1.  **Build the executable:**
+    ```bash
+    make build
+    ```
+    This will create the `cartographer` binary in the `build/` directory.
+
+2.  **Analyze a sample manifest:**
+    Let's assume you have a simple `deployment.yaml` file:
+    ```yaml
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: my-nginx-deployment
+      labels:
+        app: nginx
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: nginx
+      template:
+        metadata:
+          labels:
+            app: nginx
+        spec:
+          containers:
+          - name: nginx
+            image: nginx:latest
+    ```
+    Run Cartographer to analyze it and generate a DOT file:
+    ```bash
+    ./build/darwin_arm64/cartographer analyze --input deployment.yaml --output-format dot --output-file deployment.dot
+    ```
+    (Adjust the path to the binary based on your OS, e.g., `./build/linux/cartographer` for Linux.)
+
+3.  **Visualize the graph:**
+    Use Graphviz to convert the DOT file into a PNG image:
+    ```bash
+    dot -Tpng deployment.dot -o deployment.png
+    ```
+    This will create `deployment.png` showing the dependency graph.
+
+This basic workflow demonstrates how to use Cartographer to gain insights into your Kubernetes configurations.
+
 ### Update Dependencies
 Cartographer uses Go modules. From the repository root:
 
@@ -78,7 +127,7 @@ Cartographer offers a flexible CLI with an analyze subcommand using the Helm SDK
 #### Key Flags
 
 - `--input`: Path to a Kubernetes YAML file.
-- `--chart`: Local path or remote chart name (bitnami/postgresql).
+- `--chart`: Local path or remote chart name (e.g., `myrepo/mychart`).
 - `--values`: Optional path to a Helm values file.
 - `--release`: Name for the Helm release (defaults to `cartographer-release`).
 - `--version`: The Helm Chart version you wish to use.
@@ -102,14 +151,32 @@ cartographer analyze --chart /path/to/chart --release my-release --values values
 Note: the registry will need to be added to your local Helm index.
 
 ```bash
-helm repo add bitnami https://charts.bitnami.com/bitnami
-cartographer analyze --chart bitnami/postgresql --release my-release --values values.yaml --version 16.4.8 --output-format dot --output-file test.dot
+helm repo add myrepo https://charts.example.com/myrepo
+cartographer analyze --chart myrepo/mychart --release my-release --values values.yaml --version 1.0.0 --output-format dot --output-file test.dot
 ```
 
 #### 4. Analyze a Remote Helm Chart from an OCI Registry
 
 ```bash
-cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/postgresql --release my-db --version 16.4.8 --output-format dot --output-file test.dot
+cartographer analyze --chart oci://registry-1.docker.io/mycharts/mychart --release my-app --version 1.0.0 --output-format dot --output-file test.dot
+```
+
+#### 5. Analyze a Live Kubernetes Cluster (Requires `kubectl` and Kubeconfig)
+
+Cartographer can also analyze resources directly from a live Kubernetes cluster. This requires `kubectl` to be configured to access your cluster.
+
+```bash
+# Example: Analyze all Deployments in the 'default' namespace
+kubectl get deployments -n default -o yaml | cartographer analyze --input - --output-format dot --output-file live-deployments.dot
+```
+
+This command pipes the YAML output of `kubectl get deployments` directly into Cartographer's `--input -` (standard input) flag. This is a powerful way to visualize the current state of your cluster.
+
+#### 6. Analyze a Specific Resource Type from a Live Cluster
+
+```bash
+# Example: Analyze a specific Deployment and its related resources
+kubectl get deployment my-app -o yaml | cartographer analyze --input - --output-format dot --output-file my-app-deployment.dot
 ```
 
 ### Important Note on Bitnami Catalog Changes
@@ -169,6 +236,19 @@ Right now the configuration supports changing the log level of the application. 
 log:
   level: "debug"
 ```
+
+## Troubleshooting
+
+This section addresses common issues you might encounter while using Cartographer.
+
+-   **Error: File or Chart Not Found**
+    If Cartographer reports that a file or Helm chart cannot be found, double-check the provided path or chart reference. Ensure the file exists at the specified location or that the Helm repository is correctly added and updated.
+
+-   **Error: `golangci-lint` version mismatch or internal error**
+    This project uses `golangci-lint` for code quality checks. If you encounter errors related to version mismatches or internal panics during linting, it might be due to environmental factors or specific Go toolchain versions. While the core functionality of Cartographer remains unaffected, you might need to:
+    -   Ensure your Go environment is correctly set up.
+    -   Try installing a specific version of `golangci-lint` that is known to be compatible with your Go version.
+    -   Consult the `golangci-lint` documentation for advanced troubleshooting.
 
 ## Repo Maintenance
 
