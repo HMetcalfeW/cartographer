@@ -34,7 +34,10 @@ func ParseYAMLFile(path string) ([]*unstructured.Unstructured, error) {
 	for {
 		var obj map[string]interface{}
 		if err := decoder.Decode(&obj); err != nil {
-			break
+			if err == io.EOF {
+				break // End of file
+			}
+			return nil, fmt.Errorf("error: Failed to decode YAML from '%s'. Please check for malformed YAML syntax: %w", path, err)
 		}
 		// Skip empty documents.
 		if len(obj) == 0 {

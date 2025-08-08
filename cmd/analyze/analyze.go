@@ -37,9 +37,14 @@ var AnalyzeCmd = &cobra.Command{
 		outputFormat := viper.GetString("output-format")
 		outputFile := viper.GetString("output-file")
 
+		// Ensure only one input method is provided.
+		if inputPath != "" && chartPath != "" {
+			return fmt.Errorf("error: Cannot use both --input and --chart flags simultaneously. Please choose one input method.")
+		}
+
 		// Ensure at least one input is provided.
 		if inputPath == "" && chartPath == "" {
-			return fmt.Errorf("no input file or chart provided; please specify --input or --chart")
+			return fmt.Errorf("error: No input file or chart provided. Please specify either --input or --chart.")
 		}
 
 		// variable storing the render Helm chart's k8s manifests
