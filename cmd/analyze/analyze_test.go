@@ -23,7 +23,7 @@ func TestAnalyzeCommand_NoInputOrChart(t *testing.T) {
 	// Execute the command and expect an error.
 	err := root.Execute()
 	require.Error(t, err, "expected error when no input or chart is provided")
-	assert.Contains(t, err.Error(), "no input file or chart provided")
+		assert.Contains(t, err.Error(), "error: No input file or chart provided. Please specify either --input or --chart.")
 }
 
 func TestAnalyzeCommand_WithInput(t *testing.T) {

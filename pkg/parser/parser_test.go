@@ -60,4 +60,29 @@ metadata:
 
 	assert.True(t, foundPod, "Expected to find a Pod object")
 	assert.True(t, foundDeployment, "Expected to find a Deployment object")
+
+	// Test case for malformed YAML
+	malformedYAML := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+  invalid: - this is not valid yaml
+`
+	malformedFile, err := os.CreateTemp("", "malformed-*.yaml")
+	require.NoError(t, err, "Failed to create temp file for malformed YAML")
+	defer func() {
+		if err := os.Remove(malformedFile.Name()); err != nil {
+			t.Logf("failed to remove malformed temp file: %v", err)
+		}
+	}()
+	_, err = malformedFile.Write([]byte(malformedYAML))
+	require.NoError(t, err, "Failed to write malformed YAML to temp file")
+	err = malformedFile.Close()
+	require.NoError(t, err, "Failed to close malformed temp file")
+
+	_, err = parser.ParseYAMLFile(malformedFile.Name())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Failed to decode YAML from")
+	assert.Contains(t, err.Error(), "malformed YAML syntax")
 }
