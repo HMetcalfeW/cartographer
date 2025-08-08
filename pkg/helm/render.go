@@ -88,7 +88,7 @@ func RenderChart(
 		if !registry.IsOCI(chartRef) {
 			var cpo action.ChartPathOptions
 			cpo.Version = version
-			resolved, err := cpo.LocateChart(chartRef, settings)
+			_, err := cpo.LocateChart(chartRef, settings)
 			if err != nil {
 				logger.WithError(err).Error("failed to locate chart using local repo alias")
 				return "", fmt.Errorf("error: Helm chart '%s' could not be found. Ensure the Helm repository is added and the chart name is spelled correctly. If it's a local path, confirm the directory exists: %w", chartRef, err)

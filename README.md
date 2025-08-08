@@ -320,7 +320,7 @@ Contributions are welcome! If you find a bug or have an improvement, feel free t
 
 While core functionalities are tested, more comprehensive unit tests are needed for:
 
--   **Refactored Dependency Analyzers:** Comprehensive unit tests are needed for each `Analyzer` implementation (e.g., `OwnerRefAnalyzer`, `LabelSelectorAnalyzer`, `IngressAnalyzer`, `HPAAnalyzer`, `PodSpecAnalyzer`) to ensure their isolated logic is thoroughly validated.
+-   **Refactored Dependency Analyzers:** While the core `BuildDependencies` function is tested, dedicated unit tests for each `Analyzer` implementation (e.g., `OwnerRefAnalyzer`, `LabelSelectorAnalyzer`, etc.) are needed to ensure their isolated logic is thoroughly validated. This also applies to the new output formats (Mermaid, JSON).
 -   **Enhanced Error Handling:** Specific test cases to trigger and verify the new, more descriptive error messages for conflicting flags and malformed YAML inputs.
 
 These tests will improve the project's robustness and prevent regressions in these critical areas.
