@@ -52,6 +52,7 @@ var AnalyzeCmd = &cobra.Command{
 
 		// If an input file is provided, read it.
 		if inputPath != "" {
+			logger.WithField("inputPath", inputPath).Debug("Reading input file")
 			data, err := os.ReadFile(inputPath)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -60,6 +61,7 @@ var AnalyzeCmd = &cobra.Command{
 				return fmt.Errorf("failed to read input file '%s': %w", inputPath, err)
 			}
 			k8sManifests = string(data)
+			logger.WithField("inputPath", inputPath).Info("Successfully read input file")
 		}
 
 		if namespace == "" {
@@ -86,6 +88,7 @@ var AnalyzeCmd = &cobra.Command{
 		}
 
 		// Write the YAML content to a temporary file for parsing.
+		logger.Debug("Creating temporary file for YAML content")
 		tmpFile, err := os.CreateTemp("", "analyze-rendered-*.yaml")
 		if err != nil {
 			logger.WithError(err).Error("failed to create temporary file")
@@ -94,46 +97,55 @@ var AnalyzeCmd = &cobra.Command{
 
 		defer func() {
 			if err := os.Remove(tmpFile.Name()); err != nil {
-				logger.WithError(err).Error("failed to remove tmp file")
+				logger.WithError(err).Warn("failed to remove temporary file")
 			}
 		}()
 
+		logger.WithField("tmpFile", tmpFile.Name()).Debug("Writing YAML content to temporary file")
 		if _, err = tmpFile.Write([]byte(k8sManifests)); err != nil {
 			logger.WithError(err).Error("failed to write YAML content to temp file")
 			return err
 		}
 
+		logger.WithField("tmpFile", tmpFile.Name()).Debug("Closing temporary file")
 		if err := tmpFile.Close(); err != nil {
 			logger.WithError(err).Error("failed to close temp file")
 			return err
 		}
+		logger.WithField("tmpFile", tmpFile.Name()).Info("Successfully wrote YAML content to temporary file")
 
 		// Parse the YAML content.
+		logger.WithField("tmpFile", tmpFile.Name()).Debug("Parsing YAML content from temporary file")
 		objs, err := parser.ParseYAMLFile(tmpFile.Name())
 		if err != nil {
 			logger.WithError(err).Error("failed to parse YAML content in temp file")
 			return err
 		}
-		log.Debugf("Parsed %d objects", len(objs))
+		logger.Debugf("Parsed %d objects", len(objs))
 
 		// Build the dependency map.
+		logger.Debug("Building dependency map")
 		deps := dependency.BuildDependencies(objs)
+		logger.WithField("dependencies_count", len(deps)).Info("Successfully built dependency map")
 
 		if outputFormat == "dot" {
+			logger.Debug("Generating DOT content")
 			dotContent := dependency.GenerateDOT(deps)
 			if outputFile == "" {
 				// Print to stdout
+				logger.Info("Printing DOT content to stdout")
 				fmt.Println(dotContent)
 			} else {
 				// Write to a file
+				logger.WithField("outputFile", outputFile).Info("Writing DOT content to file")
 				if err := os.WriteFile(outputFile, []byte(dotContent), 0644); err != nil {
-					return fmt.Errorf("failed to write DOT output: %w", err)
+					return fmt.Errorf("failed to write DOT output to '%s': %w", outputFile, err)
 				}
-				log.Debugf("DOT file saved to %s", outputFile)
+				logger.WithField("outputFile", outputFile).Info("Successfully wrote DOT content to file")
 			}
 		} else {
 			// Default: just print dependencies in text form
-			log.Debug("Dependencies:")
+			logger.Info("Printing dependencies in text format")
 			dependency.PrintDependencies(deps)
 		}
 

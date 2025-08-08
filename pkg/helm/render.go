@@ -93,8 +93,7 @@ func RenderChart(
 				logger.WithError(err).Error("failed to locate chart using local repo alias")
 				return "", fmt.Errorf("error: Helm chart '%s' could not be found. Ensure the Helm repository is added and the chart name is spelled correctly. If it's a local path, confirm the directory exists: %w", chartRef, err)
 			}
-			chartRef = resolved
-			logger.Infof("Chart located at: %s", chartRef)
+			logger.WithField("resolvedChartPath", chartRef).Info("Chart located")
 
 		} else {
 			// Initialize action configuration.
@@ -125,11 +124,13 @@ func RenderChart(
 			pullClient.Verify = false
 
 			// Use the Pull client to resolve (and pull) the chart.
+			logger.WithField("chartRef", chartRef).Debug("Attempting to pull OCI chart")
 			addlInfo, pullErr := pullClient.Run(chartRef)
 			if pullErr != nil {
 				logger.WithError(pullErr).WithField("addInfo", addlInfo).Error("failed to pull chart using Helm pull action")
 				return "", fmt.Errorf("error: Failed to pull OCI chart '%s'. Please check the chart reference, registry availability, and your authentication: %w", chartRef, pullErr)
 			}
+			logger.WithField("chartRef", chartRef).Info("Successfully pulled OCI chart")
 
 			/**
 			* Sadly the Helm SDK's pull function does not return a string of where it actually saved
@@ -169,11 +170,13 @@ func RenderChart(
 	}
 
 	// Load the chart from the resolved path.
+	logger.WithField("chartPath", chartRef).Debug("Loading chart from path")
 	ch, err := loader.Load(chartRef)
 	if err != nil {
 		logger.WithError(err).Error("failed to load chart")
 		return "", fmt.Errorf("error: Failed to load Helm chart from '%s'. This might indicate a corrupted chart or an invalid chart format: %w", chartRef, err)
 	}
+	logger.WithField("chartName", ch.Name()).Info("Successfully loaded chart")
 
 	// Check and update chart dependencies if necessary.
 	if ch.Metadata.Dependencies != nil {
@@ -203,6 +206,7 @@ func RenderChart(
 	// Read user-provided values, if any.
 	userValues := map[string]interface{}{}
 	if valuesFile != "" {
+		logger.WithField("valuesFile", valuesFile).Debug("Reading values file")
 		data, err := os.ReadFile(valuesFile)
 		if err != nil {
 			logger.WithError(err).Error("failed to read values file")
@@ -211,10 +215,12 @@ func RenderChart(
 			}
 			return "", fmt.Errorf("failed to read values file '%s': %w", valuesFile, err)
 		}
+		logger.WithField("valuesFile", valuesFile).Debug("Unmarshaling values file")
 		if err := yaml.Unmarshal(data, &userValues); err != nil {
 			logger.WithError(err).Error("failed to unmarshal values file")
 			return "", err
 		}
+		logger.WithField("valuesFile", valuesFile).Info("Successfully processed values file")
 	}
 
 	coalesced, err := chartutil.CoalesceValues(ch, userValues)
@@ -222,6 +228,7 @@ func RenderChart(
 		logger.WithError(err).Error("failed to coalesce values")
 		return "", fmt.Errorf("failed to coalesce values: %w", err)
 	}
+	logger.Debug("Successfully coalesced values")
 
 	renderVals, err := chartutil.ToRenderValues(ch, coalesced, chartutil.ReleaseOptions{
 		Name:      releaseName,
@@ -231,13 +238,16 @@ func RenderChart(
 		logger.WithError(err).Error("failed to prepare render values")
 		return "", fmt.Errorf("failed to prepare render values: %w", err)
 	}
+	logger.Debug("Successfully prepared render values")
 
 	// Render the chart templates.
+	logger.Debug("Rendering chart templates")
 	renderedFiles, err := engine.Render(ch, renderVals)
 	if err != nil {
 		logger.WithError(err).Error("failed to render chart templates")
 		return "", fmt.Errorf("failed to render chart templates: %w", err)
 	}
+	logger.Info("Successfully rendered chart templates")
 
 	// Combine only YAML files.
 	var combined strings.Builder
