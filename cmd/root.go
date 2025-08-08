@@ -10,6 +10,30 @@ import (
 
 var cfgFile string
 
+// Config holds all application-wide configuration settings.
+type Config struct {
+	Log struct {
+		Level string `mapstructure:"level"`
+	} `mapstructure:"log"`
+	Output struct {
+		DefaultFormat string `mapstructure:"defaultFormat"`
+	} `mapstructure:"output"`
+	Graph struct {
+		NodeShape string `mapstructure:"nodeShape"`
+		NodeColor string `mapstructure:"nodeColor"`
+		EdgeColor string `mapstructure:"edgeColor"`
+	} `mapstructure:"graph"`
+	Filter struct {
+		IncludeKinds      []string `mapstructure:"includeKinds"`
+		ExcludeKinds      []string `mapstructure:"excludeKinds"`
+		IncludeNamespaces []string `mapstructure:"includeNamespaces"`
+		ExcludeNamespaces []string `mapstructure:"excludeNamespaces"`
+	} `mapstructure:"filter"`
+}
+
+// AppConfig is the global application configuration.
+var AppConfig Config
+
 // rootCmd represents the base command.
 var RootCmd = &cobra.Command{
 	Use:   "cartographer",
@@ -61,12 +85,25 @@ func initConfig() {
 
 	if err := viper.ReadInConfig(); err == nil {
 		logger.Info("Using config file:", viper.ConfigFileUsed())
+		// Unmarshal the config into the AppConfig struct
+		if err := viper.Unmarshal(&AppConfig); err != nil {
+			logger.WithError(err).Fatal("failed to unmarshal config")
+		}
 	} else {
 		logger.WithError(err).Info("Error")
 	}
 
+	// Set default values if not provided in config
+	if AppConfig.Output.DefaultFormat == "" {
+		AppConfig.Output.DefaultFormat = "dot"
+	}
+	if AppConfig.Graph.NodeShape == "" {
+		AppConfig.Graph.NodeShape = "box"
+	}
+	// ... set other defaults as needed
+
 	// Now update the logging level based on the configuration.
-	levelStr := viper.GetString("log.level")
+	levelStr := AppConfig.Log.Level
 	if levelStr != "" {
 		lvl, err := log.ParseLevel(levelStr)
 		if err != nil {

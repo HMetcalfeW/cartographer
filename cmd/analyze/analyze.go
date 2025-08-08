@@ -35,6 +35,9 @@ var AnalyzeCmd = &cobra.Command{
 		namespace := viper.GetString("namespace")
 		releaseName := viper.GetString("release")
 		outputFormat := viper.GetString("output-format")
+		if outputFormat == "dot" { // Check if default value is still present
+			outputFormat = AppConfig.Output.DefaultFormat
+		}
 		outputFile := viper.GetString("output-file")
 
 		// Ensure only one input method is provided.

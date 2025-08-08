@@ -7,6 +7,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/HMetcalfeW/cartographer/cmd"
 )
 
 // Edge represents a single dependency from one Kubernetes resource (the parent)
@@ -118,7 +120,9 @@ func GenerateDOT(deps map[string][]Edge) string {
 	var sb strings.Builder
 	sb.WriteString("digraph G {\n")
 	sb.WriteString("  rankdir=\"LR\";\n")
-	sb.WriteString("  node [shape=box];\n\n")
+	sb.WriteString(fmt.Sprintf("  node [shape=%s];
+
+", cmd.AppConfig.Graph.NodeShape))
 
 	for parent, edges := range deps {
 		for _, edge := range edges {
@@ -140,7 +144,9 @@ func GenerateMermaid(deps map[string][]Edge) string {
 			// Sanitize IDs for Mermaid (replace / with _)
 			sanitizedParent := strings.ReplaceAll(parent, "/", "_")
 			sanitizedChild := strings.ReplaceAll(edge.ChildID, "/", "_")
-			sb.WriteString(fmt.Sprintf("  %s --> |%s| %s\n", sanitizedParent, edge.Reason, sanitizedChild))
+			sb.WriteString(fmt.Sprintf("  %s(%s) %s[%s] %s(%s)\n", sanitizedParent, sanitizedParent, cmd.AppConfig.Graph.EdgeColor, edge.Reason, sanitizedChild, sanitizedChild))
+			sb.WriteString(fmt.Sprintf("  style %s fill:%s,stroke:%s,stroke-width:2px\n", sanitizedParent, cmd.AppConfig.Graph.NodeColor, cmd.AppConfig.Graph.NodeColor))
+			sb.WriteString(fmt.Sprintf("  style %s fill:%s,stroke:%s,stroke-width:2px\n", sanitizedChild, cmd.AppConfig.Graph.NodeColor, cmd.AppConfig.Graph.NodeColor))
 		}
 	}
 	return sb.String()

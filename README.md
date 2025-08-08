@@ -246,11 +246,22 @@ dot -Tpng bitnami-metallb.dot -o bitnami-metallb.png
 ## Configuration
 The default location of cartographer's configuration file if the `--config` flag is undefined is `$HOME/.cartographer.yaml`
 
-Right now the configuration supports changing the log level of the application. For example:
+Cartographer's configuration allows you to customize various aspects of its behavior. Here's an example `.cartographer.yaml`:
 
 ```yaml
 log:
-  level: "debug"
+  level: "info" # Set logging level (debug, info, warn, error)
+output:
+  defaultFormat: "dot" # Set default output format (dot, mermaid, json)
+graph:
+  nodeShape: "box" # Graphviz node shape (e.g., box, ellipse, circle)
+  nodeColor: "#ADD8E6" # Hex color for nodes (e.g., lightblue)
+  edgeColor: "#333333" # Hex color for edges (e.g., darkgray)
+filter:
+  includeKinds: [] # List of Kubernetes resource kinds to include (e.g., ["Deployment", "Service"])
+  excludeKinds: [] # List of Kubernetes resource kinds to exclude
+  includeNamespaces: [] # List of namespaces to include
+  excludeNamespaces: [] # List of namespaces to exclude
 ```
 
 ## Troubleshooting
