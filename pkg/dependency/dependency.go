@@ -61,10 +61,21 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 	})
 	mainLogger.Info("Starting dependency analysis")
 
+	filteredObjs := []*unstructured.Unstructured{}
+	for _, obj := range objs {
+		// Apply filtering rules
+		if !shouldInclude(obj) {
+			continue
+		}
+		filteredObjs = append(filteredObjs, obj)
+	}
+
+	mainLogger.WithField("filtered_count", len(filteredObjs)).Info("Filtered objects for dependency analysis")
+
 	dependencies := make(map[string][]Edge)
 
 	// 1. Create an empty slice for every resource upfront, so loners appear in the final map.
-	for _, obj := range objs {
+	for _, obj := range filteredObjs {
 		parentKey := ResourceID(obj)
 		dependencies[parentKey] = []Edge{} // ensures each resource is present
 	}
@@ -80,13 +91,60 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 
 	// Run each analyzer.
 	for _, analyzer := range analyzers {
-		for _, obj := range objs {
-			analyzer.Analyze(obj, objs, dependencies)
+		for _, obj := range filteredObjs {
+			analyzer.Analyze(obj, filteredObjs, dependencies)
 		}
 	}
 
 	mainLogger.WithField("dependencies_count", len(dependencies)).Info("Finished building dependencies")
 	return dependencies
+}
+
+// shouldInclude applies filtering rules based on AppConfig.
+func shouldInclude(obj *unstructured.Unstructured) bool {
+	// Kind filtering
+	if len(cmd.AppConfig.Filter.IncludeKinds) > 0 {
+		found := false
+		for _, kind := range cmd.AppConfig.Filter.IncludeKinds {
+			if obj.GetKind() == kind {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	if len(cmd.AppConfig.Filter.ExcludeKinds) > 0 {
+		for _, kind := range cmd.AppConfig.Filter.ExcludeKinds {
+			if obj.GetKind() == kind {
+				return false
+			}
+		}
+	}
+
+	// Namespace filtering
+	if len(cmd.AppConfig.Filter.IncludeNamespaces) > 0 {
+		found := false
+		for _, ns := range cmd.AppConfig.Filter.IncludeNamespaces {
+			if obj.GetNamespace() == ns {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	if len(cmd.AppConfig.Filter.ExcludeNamespaces) > 0 {
+		for _, ns := range cmd.AppConfig.Filter.ExcludeNamespaces {
+			if obj.GetNamespace() == ns {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 // PrintDependencies logs each parent and its dependencies (Edges) at the Info level.
