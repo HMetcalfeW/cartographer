@@ -4,6 +4,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/go-playground/validator/v10"
 
 	analyze "github.com/HMetcalfeW/cartographer/cmd/analyze"
 )
@@ -13,15 +14,15 @@ var cfgFile string
 // Config holds all application-wide configuration settings.
 type Config struct {
 	Log struct {
-		Level string `mapstructure:"level"`
+		Level string `mapstructure:"level" validate:"omitempty,oneof=debug info warn error fatal panic"`
 	} `mapstructure:"log"`
 	Output struct {
-		DefaultFormat string `mapstructure:"defaultFormat"`
+		DefaultFormat string `mapstructure:"defaultFormat" validate:"omitempty,oneof=dot mermaid json"`
 	} `mapstructure:"output"`
 	Graph struct {
-		NodeShape string `mapstructure:"nodeShape"`
-		NodeColor string `mapstructure:"nodeColor"`
-		EdgeColor string `mapstructure:"edgeColor"`
+		NodeShape string `mapstructure:"nodeShape" validate:"omitempty,min=1"`
+		NodeColor string `mapstructure:"nodeColor" validate:"omitempty,hexcolor|rgb|rgba"`
+		EdgeColor string `mapstructure:"edgeColor" validate:"omitempty,hexcolor|rgb|rgba"`
 	} `mapstructure:"graph"`
 	Filter struct {
 		IncludeKinds      []string `mapstructure:"includeKinds"`
@@ -89,6 +90,12 @@ func initConfig() {
 		if err := viper.Unmarshal(&AppConfig); err != nil {
 			logger.WithError(err).Fatal("failed to unmarshal config")
 		}
+
+		// Validate the configuration
+		validate := validator.New()
+		if err := validate.Struct(AppConfig); err != nil {
+			logger.WithError(err).Fatal("Invalid configuration")
+		}
 	} else {
 		logger.WithError(err).Info("Error")
 	}
@@ -100,7 +107,12 @@ func initConfig() {
 	if AppConfig.Graph.NodeShape == "" {
 		AppConfig.Graph.NodeShape = "box"
 	}
-	// ... set other defaults as needed
+	if AppConfig.Graph.NodeColor == "" {
+		AppConfig.Graph.NodeColor = "#ADD8E6"
+	}
+	if AppConfig.Graph.EdgeColor == "" {
+		AppConfig.Graph.EdgeColor = "#333333"
+	}
 
 	// Now update the logging level based on the configuration.
 	levelStr := AppConfig.Log.Level

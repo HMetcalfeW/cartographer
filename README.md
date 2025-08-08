@@ -246,23 +246,25 @@ dot -Tpng bitnami-metallb.dot -o bitnami-metallb.png
 ## Configuration
 The default location of cartographer's configuration file if the `--config` flag is undefined is `$HOME/.cartographer.yaml`
 
-Cartographer's configuration allows you to customize various aspects of its behavior. Here's an example `.cartographer.yaml`:
+Cartographer's configuration allows you to customize various aspects of its behavior. The configuration is validated against a schema to ensure correctness. Here's an example `.cartographer.yaml`:
 
 ```yaml
 log:
-  level: "info" # Set logging level (debug, info, warn, error)
+  level: "info" # Set logging level (debug, info, warn, error, fatal, panic). Validated.
 output:
-  defaultFormat: "dot" # Set default output format (dot, mermaid, json)
+  defaultFormat: "dot" # Set default output format (dot, mermaid, json). Validated.
 graph:
-  nodeShape: "box" # Graphviz node shape (e.g., box, ellipse, circle)
-  nodeColor: "#ADD8E6" # Hex color for nodes (e.g., lightblue)
-  edgeColor: "#333333" # Hex color for edges (e.g., darkgray)
+  nodeShape: "box" # Graphviz node shape (e.g., box, ellipse, circle). Validated.
+  nodeColor: "#ADD8E6" # Hex color for nodes (e.g., lightblue). Validated.
+  edgeColor: "#333333" # Hex color for edges (e.g., darkgray). Validated.
 filter:
-  includeKinds: [] # List of Kubernetes resource kinds to include (e.g., ["Deployment", "Service"])
-  excludeKinds: [] # List of Kubernetes resource kinds to exclude
-  includeNamespaces: [] # List of namespaces to include
-  excludeNamespaces: [] # List of namespaces to exclude
+  includeKinds: [] # List of Kubernetes resource kinds to include (e.g., ["Deployment", "Service"]).
+  excludeKinds: [] # List of Kubernetes resource kinds to exclude.
+  includeNamespaces: [] # List of namespaces to include.
+  excludeNamespaces: [] # List of namespaces to exclude.
 ```
+
+Invalid configuration values will result in an error during startup, providing immediate feedback.
 
 ## Troubleshooting
 
