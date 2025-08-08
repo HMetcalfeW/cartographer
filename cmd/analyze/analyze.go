@@ -139,14 +139,41 @@ var AnalyzeCmd = &cobra.Command{
 				// Write to a file
 				logger.WithField("outputFile", outputFile).Info("Writing DOT content to file")
 				if err := os.WriteFile(outputFile, []byte(dotContent), 0644); err != nil {
-					return fmt.Errorf("failed to write DOT output to '%s': %w", outputFile, err)
+										return fmt.Errorf("failed to write DOT output to '%s': %w", outputFile, err)
 				}
 				logger.WithField("outputFile", outputFile).Info("Successfully wrote DOT content to file")
 			}
+		} else if outputFormat == "mermaid" {
+			logger.Debug("Generating Mermaid content")
+			mermaidContent := dependency.GenerateMermaid(deps)
+			if outputFile == "" {
+				logger.Info("Printing Mermaid content to stdout")
+				fmt.Println(mermaidContent)
+			} else {
+				logger.WithField("outputFile", outputFile).Info("Writing Mermaid content to file")
+				if err := os.WriteFile(outputFile, []byte(mermaidContent), 0644); err != nil {
+					return fmt.Errorf("failed to write Mermaid output to '%s': %w", outputFile, err)
+				}
+				logger.WithField("outputFile", outputFile).Info("Successfully wrote Mermaid content to file")
+			}
+		} else if outputFormat == "json" {
+			logger.Debug("Generating JSON content")
+			jsonContent, err := dependency.GenerateJSON(deps)
+			if err != nil {
+				return fmt.Errorf("failed to generate JSON output: %w", err)
+			}
+			if outputFile == "" {
+				logger.Info("Printing JSON content to stdout")
+				fmt.Println(jsonContent)
+			} else {
+				logger.WithField("outputFile", outputFile).Info("Writing JSON content to file")
+				if err := os.WriteFile(outputFile, []byte(jsonContent), 0644); err != nil {
+					return fmt.Errorf("failed to write JSON output to '%s': %w", outputFile, err)
+				}
+				logger.WithField("outputFile", outputFile).Info("Successfully wrote JSON content to file")
+			}
 		} else {
-			// Default: just print dependencies in text form
-			logger.Info("Printing dependencies in text format")
-			dependency.PrintDependencies(deps)
+			return fmt.Errorf("error: Unsupported output format '%s'. Supported formats are 'dot', 'mermaid', and 'json'.", outputFormat)
 		}
 
 		return nil
@@ -163,7 +190,7 @@ func init() {
 	AnalyzeCmd.Flags().StringP("release", "l", "cartographer-release", "Release name for the Helm chart")
 	AnalyzeCmd.Flags().String("version", "", "Chart version to pull (optional if remote charts specify a version)")
 	AnalyzeCmd.Flags().String("namespace", "", "Namespace to inject into the Helm rendered release")
-	AnalyzeCmd.Flags().String("output-format", "dot", "Output format (e.g. 'dot' - also the default). If empty, prints text dependencies.")
+	AnalyzeCmd.Flags().StringP("output-format", "o", "dot", "Output format (dot, mermaid, json). Defaults to 'dot'.")
 	AnalyzeCmd.Flags().String("output-file", "", "Output file for the DOT data (if --output-format=dot). Prints to stdout by default.")
 
 	// Bind flags with Viper.

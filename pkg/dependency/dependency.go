@@ -3,6 +3,7 @@ package dependency
 import (
 	"fmt"
 	"strings"
+	"encoding/json"
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -126,6 +127,42 @@ func GenerateDOT(deps map[string][]Edge) string {
 	}
 	sb.WriteString("}\n")
 	return sb.String()
+}
+
+// GenerateMermaid produces a Mermaid graph where each parent node has directed edges
+// to its child nodes, labeled with the Reason describing why the relationship exists.
+func GenerateMermaid(deps map[string][]Edge) string {
+	var sb strings.Builder
+	sb.WriteString("graph LR\n")
+
+	for parent, edges := range deps {
+		for _, edge := range edges {
+			// Sanitize IDs for Mermaid (replace / with _)
+			sanitizedParent := strings.ReplaceAll(parent, "/", "_")
+			sanitizedChild := strings.ReplaceAll(edge.ChildID, "/", "_")
+			sb.WriteString(fmt.Sprintf("  %s --> |%s| %s\n", sanitizedParent, edge.Reason, sanitizedChild))
+		}
+	}
+	return sb.String()
+}
+
+// GenerateJSON produces a JSON representation of the dependency graph.
+func GenerateJSON(deps map[string][]Edge) (string, error) {
+	// For simplicity, we'll convert the map to a slice of structs for JSON marshaling.
+	type Node struct {
+		ID    string `json:"id"`
+		Edges []Edge `json:"edges"`
+	}
+
+	var nodes []Node
+	for parentID, edges := range deps {
+		nodes = append(nodes, Node{ID: parentID, Edges: edges})
+	}
+	jsonBytes, err := json.MarshalIndent(nodes, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(jsonBytes), nil
 }
 
 // IsPodOrController returns true if the object is a Pod or a common controller

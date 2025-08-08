@@ -161,7 +161,23 @@ cartographer analyze --chart myrepo/mychart --release my-release --values values
 cartographer analyze --chart oci://registry-1.docker.io/mycharts/mychart --release my-app --version 1.0.0 --output-format dot --output-file test.dot
 ```
 
-#### 5. Analyze a Live Kubernetes Cluster (Requires `kubectl` and Kubeconfig)
+#### 5. Generate Mermaid Diagram
+
+```bash
+cartographer analyze --input deployment.yaml --output-format mermaid --output-file deployment.mmd
+```
+
+This will create `deployment.mmd` containing the Mermaid syntax for your dependency graph, which can be rendered in many Markdown viewers (e.g., GitHub, GitLab).
+
+#### 6. Generate JSON Output
+
+```bash
+cartographer analyze --input deployment.yaml --output-format json --output-file deployment.json
+```
+
+This will create `deployment.json` containing a structured JSON representation of your dependency graph, useful for programmatic consumption.
+
+#### 7. Analyze a Live Kubernetes Cluster (Requires `kubectl` and Kubeconfig)
 
 Cartographer can also analyze resources directly from a live Kubernetes cluster. This requires `kubectl` to be configured to access your cluster.
 
@@ -172,7 +188,7 @@ kubectl get deployments -n default -o yaml | cartographer analyze --input - --ou
 
 This command pipes the YAML output of `kubectl get deployments` directly into Cartographer's `--input -` (standard input) flag. This is a powerful way to visualize the current state of your cluster.
 
-#### 6. Analyze a Specific Resource Type from a Live Cluster
+#### 8. Analyze a Specific Resource Type from a Live Cluster
 
 ```bash
 # Example: Analyze a specific Deployment and its related resources
