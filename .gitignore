@@ -2,6 +2,7 @@
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
 # Binaries for programs and plugins
+cartographer
 *.exe
 *.exe~
 *.dll
@@ -31,3 +32,7 @@ build/
 
 # Mac files
 .DS_STORE
+
+# Generated output files
+*.dot
+*.png

@@ -131,8 +131,27 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 		}
 	}
 
+	// Deduplicate edges for each parent.
+	for parent, edges := range dependencies {
+		dependencies[parent] = deduplicateEdges(edges)
+	}
+
 	mainLogger.WithField("dependencies_count", len(dependencies)).Info("Finished building dependencies")
 	return dependencies
+}
+
+// deduplicateEdges removes duplicate edges based on ChildID+Reason.
+func deduplicateEdges(edges []Edge) []Edge {
+	seen := make(map[string]struct{}, len(edges))
+	result := make([]Edge, 0, len(edges))
+	for _, e := range edges {
+		key := e.ChildID + "|" + e.Reason
+		if _, exists := seen[key]; !exists {
+			seen[key] = struct{}{}
+			result = append(result, e)
+		}
+	}
+	return result
 }
 
 // PrintDependencies logs each parent and its dependencies (Edges) at the Info level.
@@ -240,77 +259,93 @@ func GetPodSpec(obj *unstructured.Unstructured) (map[string]interface{}, bool, e
 func GatherPodSpecReferences(
 	podSpec map[string]interface{},
 ) (secretRefs, configMapRefs, pvcRefs, serviceAccounts []string) {
-	// Volumes
-	if volSlice, foundVol, _ := unstructured.NestedSlice(podSpec, "volumes"); foundVol && len(volSlice) > 0 {
-		for _, vol := range volSlice {
-			if volMap, ok := vol.(map[string]interface{}); ok {
-				switch {
-				case volMap["secret"] != nil:
-					sObj := volMap["secret"].(map[string]interface{})
-					if sName, ok := sObj["secretName"].(string); ok {
-						secretRefs = append(secretRefs, "Secret/"+sName)
-					}
-				case volMap["configMap"] != nil:
-					cmObj := volMap["configMap"].(map[string]interface{})
-					if cmName, ok := cmObj["name"].(string); ok {
-						configMapRefs = append(configMapRefs, "ConfigMap/"+cmName)
-					}
-				case volMap["persistentVolumeClaim"] != nil:
-					pvcObj := volMap["persistentVolumeClaim"].(map[string]interface{})
-					if pvcName, ok := pvcObj["claimName"].(string); ok {
-						pvcRefs = append(pvcRefs, "PersistentVolumeClaim/"+pvcName)
-					}
-				}
-			}
-		}
-	}
-
-	// serviceAccountName
-	if saName, foundSA, _ := unstructured.NestedString(podSpec, "serviceAccountName"); foundSA && saName != "" {
-		serviceAccounts = append(serviceAccounts, "ServiceAccount/"+saName)
-	}
-
-	// imagePullSecrets
-	if ipsList, foundIPS, _ := unstructured.NestedSlice(podSpec, "imagePullSecrets"); foundIPS && len(ipsList) > 0 {
-		for _, ips := range ipsList {
-			if ipsMap, ok := ips.(map[string]interface{}); ok {
-				if secretName, ok := ipsMap["name"].(string); ok && secretName != "" {
-					secretRefs = append(secretRefs, "Secret/"+secretName)
-				}
-			}
-		}
-	}
-
-	// containers, initContainers, ephemeralContainers
-	cKeys := []string{"containers", "initContainers", "ephemeralContainers"}
-	for _, cKey := range cKeys {
-		if cList, foundC, _ := unstructured.NestedSlice(podSpec, cKey); foundC && len(cList) > 0 {
-			for _, cVal := range cList {
-				if cMap, ok := cVal.(map[string]interface{}); ok {
-					// env
-					if envList, foundEnv, _ := unstructured.NestedSlice(cMap, "env"); foundEnv && len(envList) > 0 {
-						for _, envVal := range envList {
-							if envMap, ok := envVal.(map[string]interface{}); ok {
-								if valueFrom, ok := envMap["valueFrom"].(map[string]interface{}); ok {
-									ParseEnvValueFrom(valueFrom, &secretRefs, &configMapRefs)
-								}
-							}
-						}
-					}
-					// envFrom
-					if envFromList, foundEF, _ := unstructured.NestedSlice(cMap, "envFrom"); foundEF && len(envFromList) > 0 {
-						for _, envFromVal := range envFromList {
-							if envFromMap, ok := envFromVal.(map[string]interface{}); ok {
-								ParseEnvFrom(envFromMap, &secretRefs, &configMapRefs)
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
+	gatherVolumeRefs(podSpec, &secretRefs, &configMapRefs, &pvcRefs)
+	gatherServiceAccountRefs(podSpec, &serviceAccounts)
+	gatherImagePullSecretRefs(podSpec, &secretRefs)
+	gatherContainerEnvRefs(podSpec, &secretRefs, &configMapRefs)
 	return
+}
+
+// gatherVolumeRefs extracts secret, configMap, and PVC references from .spec.volumes.
+func gatherVolumeRefs(podSpec map[string]interface{}, secretRefs, configMapRefs, pvcRefs *[]string) {
+	volSlice, found, _ := unstructured.NestedSlice(podSpec, "volumes")
+	if !found {
+		return
+	}
+	for _, vol := range volSlice {
+		volMap, ok := vol.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if sObj, ok := volMap["secret"].(map[string]interface{}); ok {
+			if sName, ok := sObj["secretName"].(string); ok {
+				*secretRefs = append(*secretRefs, "Secret/"+sName)
+			}
+		} else if cmObj, ok := volMap["configMap"].(map[string]interface{}); ok {
+			if cmName, ok := cmObj["name"].(string); ok {
+				*configMapRefs = append(*configMapRefs, "ConfigMap/"+cmName)
+			}
+		} else if pvcObj, ok := volMap["persistentVolumeClaim"].(map[string]interface{}); ok {
+			if pvcName, ok := pvcObj["claimName"].(string); ok {
+				*pvcRefs = append(*pvcRefs, "PersistentVolumeClaim/"+pvcName)
+			}
+		}
+	}
+}
+
+// gatherServiceAccountRefs extracts .spec.serviceAccountName.
+func gatherServiceAccountRefs(podSpec map[string]interface{}, serviceAccounts *[]string) {
+	if saName, found, _ := unstructured.NestedString(podSpec, "serviceAccountName"); found && saName != "" {
+		*serviceAccounts = append(*serviceAccounts, "ServiceAccount/"+saName)
+	}
+}
+
+// gatherImagePullSecretRefs extracts secret names from .spec.imagePullSecrets.
+func gatherImagePullSecretRefs(podSpec map[string]interface{}, secretRefs *[]string) {
+	ipsList, found, _ := unstructured.NestedSlice(podSpec, "imagePullSecrets")
+	if !found {
+		return
+	}
+	for _, ips := range ipsList {
+		if ipsMap, ok := ips.(map[string]interface{}); ok {
+			if secretName, ok := ipsMap["name"].(string); ok && secretName != "" {
+				*secretRefs = append(*secretRefs, "Secret/"+secretName)
+			}
+		}
+	}
+}
+
+// gatherContainerEnvRefs extracts secret/configMap references from env and envFrom
+// across containers, initContainers, and ephemeralContainers.
+func gatherContainerEnvRefs(podSpec map[string]interface{}, secretRefs, configMapRefs *[]string) {
+	for _, cKey := range []string{"containers", "initContainers", "ephemeralContainers"} {
+		cList, found, _ := unstructured.NestedSlice(podSpec, cKey)
+		if !found {
+			continue
+		}
+		for _, cVal := range cList {
+			cMap, ok := cVal.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if envList, foundEnv, _ := unstructured.NestedSlice(cMap, "env"); foundEnv {
+				for _, envVal := range envList {
+					if envMap, ok := envVal.(map[string]interface{}); ok {
+						if valueFrom, ok := envMap["valueFrom"].(map[string]interface{}); ok {
+							ParseEnvValueFrom(valueFrom, secretRefs, configMapRefs)
+						}
+					}
+				}
+			}
+			if envFromList, foundEF, _ := unstructured.NestedSlice(cMap, "envFrom"); foundEF {
+				for _, envFromVal := range envFromList {
+					if envFromMap, ok := envFromVal.(map[string]interface{}); ok {
+						ParseEnvFrom(envFromMap, secretRefs, configMapRefs)
+					}
+				}
+			}
+		}
+	}
 }
 
 // ParseEnvValueFrom examines env[].valueFrom for references to secrets/configmaps.
@@ -368,6 +403,9 @@ func handleServiceLabelSelector(
 	selectorMap := MapInterfaceToStringMap(selObj)
 
 	for _, target := range allObjs {
+		if !IsPodOrController(target) {
+			continue
+		}
 		if LabelsMatch(selectorMap, target.GetLabels()) {
 			tgtID := ResourceID(target)
 			deps[svcID] = append(deps[svcID], Edge{ChildID: tgtID, Reason: "selector"})
@@ -401,6 +439,9 @@ func handleNetworkPolicy(
 
 	if selFound && len(selectorMap) > 0 {
 		for _, obj := range allObjs {
+			if !IsPodOrController(obj) {
+				continue
+			}
 			if LabelsMatch(selectorMap, obj.GetLabels()) {
 				tgtID := ResourceID(obj)
 				deps[npID] = append(deps[npID], Edge{ChildID: tgtID, Reason: "podSelector"})
@@ -435,6 +476,9 @@ func handlePodDisruptionBudget(
 
 	if selFound && len(selMap) > 0 {
 		for _, obj := range allObjs {
+			if !IsPodOrController(obj) {
+				continue
+			}
 			if LabelsMatch(selMap, obj.GetLabels()) {
 				tgtID := ResourceID(obj)
 				deps[pdbID] = append(deps[pdbID], Edge{ChildID: tgtID, Reason: "pdbSelector"})

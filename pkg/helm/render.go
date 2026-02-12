@@ -8,6 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/cli"
@@ -228,6 +229,18 @@ func RenderChart(
 		logger.WithError(err).Error("failed to prepare render values")
 		return "", fmt.Errorf("failed to prepare render values: %w", err)
 	}
+
+	// Filter out non-manifest templates (e.g. NOTES.txt) before rendering,
+	// as they may contain fail directives that aren't relevant to manifest analysis.
+	filtered := make([]*chart.File, 0, len(ch.Templates))
+	for _, t := range ch.Templates {
+		baseName := filepath.Base(t.Name)
+		if strings.EqualFold(baseName, "NOTES.txt") {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	ch.Templates = filtered
 
 	// Render the chart templates.
 	renderedFiles, err := engine.Render(ch, renderVals)

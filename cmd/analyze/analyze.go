@@ -147,35 +147,10 @@ func init() {
 	AnalyzeCmd.Flags().String("output-file", "", "Output file for the DOT data (if --output-format=dot). Prints to stdout by default.")
 
 	// Bind flags with Viper.
-	if err := viper.BindPFlag("input", AnalyzeCmd.Flags().Lookup("input")); err != nil {
-		log.WithError(err).Fatal("failed to bind the flag `input`")
-	}
-
-	if err := viper.BindPFlag("chart", AnalyzeCmd.Flags().Lookup("chart")); err != nil {
-		log.WithError(err).Fatal("failed to bind the flag `chart`")
-	}
-
-	if err := viper.BindPFlag("values", AnalyzeCmd.Flags().Lookup("values")); err != nil {
-		log.WithError(err).Fatal("failed to bind the flag `values`")
-	}
-
-	if err := viper.BindPFlag("release", AnalyzeCmd.Flags().Lookup("release")); err != nil {
-		log.WithError(err).Fatal("failed to bind the flag `release`")
-	}
-
-	if err := viper.BindPFlag("version", AnalyzeCmd.Flags().Lookup("version")); err != nil {
-		log.WithError(err).Fatal("failed to bind the flag `version`")
-	}
-
-	if err := viper.BindPFlag("namespace", AnalyzeCmd.Flags().Lookup("namespace")); err != nil {
-		log.WithError(err).Fatal("failed to bind the flag `namespace`")
-	}
-
-	if err := viper.BindPFlag("output-format", AnalyzeCmd.Flags().Lookup("output-format")); err != nil {
-		log.WithError(err).Fatal("failed to bind the flag `output-format`")
-	}
-
-	if err := viper.BindPFlag("output-file", AnalyzeCmd.Flags().Lookup("output-file")); err != nil {
-		log.WithError(err).Fatal("failed to bind the flag `output-file`")
+	flags := []string{"input", "chart", "values", "release", "version", "namespace", "output-format", "output-file"}
+	for _, name := range flags {
+		if err := viper.BindPFlag(name, AnalyzeCmd.Flags().Lookup(name)); err != nil {
+			log.WithError(err).Fatalf("failed to bind the flag `%s`", name)
+		}
 	}
 }

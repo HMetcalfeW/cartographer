@@ -62,7 +62,7 @@ func initConfig() {
 	if err := viper.ReadInConfig(); err == nil {
 		logger.Info("Using config file:", viper.ConfigFileUsed())
 	} else {
-		logger.WithError(err).Info("Error")
+		logger.WithError(err).Warn("Could not read config file, using defaults")
 	}
 
 	// Now update the logging level based on the configuration.
