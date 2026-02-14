@@ -453,3 +453,133 @@ func TestGatherPodSpecReferences(t *testing.T) {
 	assert.Contains(t, sas, "ServiceAccount/my-sa")
 	assert.Empty(t, pvcs, "No PVC references here")
 }
+
+// TestGatherPodSpecReferences_EmptySpec ensures an empty pod spec doesn't panic.
+func TestGatherPodSpecReferences_EmptySpec(t *testing.T) {
+	secrets, cms, pvcs, sas := dependency.GatherPodSpecReferences(map[string]interface{}{})
+	assert.Empty(t, secrets)
+	assert.Empty(t, cms)
+	assert.Empty(t, pvcs)
+	assert.Empty(t, sas)
+}
+
+// TestGatherPodSpecReferences_MalformedVolumes ensures malformed volume entries are skipped safely.
+func TestGatherPodSpecReferences_MalformedVolumes(t *testing.T) {
+	ps := map[string]interface{}{
+		"volumes": []interface{}{
+			// volume with secret as a string instead of map (malformed)
+			map[string]interface{}{
+				"name":   "bad-vol",
+				"secret": "not-a-map",
+			},
+			// volume entry that isn't a map at all
+			"just-a-string",
+			// valid volume to confirm processing continues
+			map[string]interface{}{
+				"name": "good-vol",
+				"configMap": map[string]interface{}{
+					"name": "valid-cm",
+				},
+			},
+		},
+	}
+	secrets, cms, _, _ := dependency.GatherPodSpecReferences(ps)
+	assert.Empty(t, secrets, "malformed secret volume should be skipped")
+	assert.Contains(t, cms, "ConfigMap/valid-cm", "valid configMap should still be found")
+}
+
+// TestDeduplicateEdges verifies that duplicate edges are removed from the dependency map.
+func TestDeduplicateEdges(t *testing.T) {
+	// Create a Deployment that references the same secret in two places (volume + env)
+	deployment := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]interface{}{"name": "dup-deploy"},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"volumes": []interface{}{
+							map[string]interface{}{
+								"name":   "s1",
+								"secret": map[string]interface{}{"secretName": "shared-secret"},
+							},
+							// same secret referenced again via a second volume
+							map[string]interface{}{
+								"name":   "s2",
+								"secret": map[string]interface{}{"secretName": "shared-secret"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{deployment})
+	edges := deps["Deployment/dup-deploy"]
+
+	// Count secretRef edges to shared-secret — should be exactly 1 after dedup
+	count := 0
+	for _, e := range edges {
+		if e.ChildID == "Secret/shared-secret" && e.Reason == "secretRef" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "duplicate secretRef edges should be deduplicated")
+}
+
+// TestServiceSelectorOnlyMatchesPodControllers verifies that Service selectors
+// only create edges to Pods/controllers, not to other resource types.
+func TestServiceSelectorOnlyMatchesPodControllers(t *testing.T) {
+	svc := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata":   map[string]interface{}{"name": "my-svc"},
+			"spec": map[string]interface{}{
+				"selector": map[string]interface{}{"app": "test"},
+			},
+		},
+	}
+	// A Deployment with matching labels (should be matched)
+	deploy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name":   "my-deploy",
+				"labels": map[string]interface{}{"app": "test"},
+			},
+		},
+	}
+	// A ServiceAccount with matching labels (should NOT be matched)
+	sa := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ServiceAccount",
+			"metadata": map[string]interface{}{
+				"name":   "my-sa",
+				"labels": map[string]interface{}{"app": "test"},
+			},
+		},
+	}
+	// A ConfigMap with matching labels (should NOT be matched)
+	cm := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":   "my-cm",
+				"labels": map[string]interface{}{"app": "test"},
+			},
+		},
+	}
+
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{svc, deploy, sa, cm})
+	svcEdges := deps["Service/my-svc"]
+
+	require.Len(t, svcEdges, 1, "Service should only match the Deployment")
+	assert.Equal(t, "Deployment/my-deploy", svcEdges[0].ChildID)
+	assert.Equal(t, "selector", svcEdges[0].Reason)
+}

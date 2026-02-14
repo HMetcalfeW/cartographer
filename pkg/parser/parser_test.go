@@ -61,3 +61,43 @@ metadata:
 	assert.True(t, foundPod, "Expected to find a Pod object")
 	assert.True(t, foundDeployment, "Expected to find a Deployment object")
 }
+
+func TestParseYAMLFile_EmptyPath(t *testing.T) {
+	_, err := parser.ParseYAMLFile("")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "file path must not be empty")
+}
+
+func TestParseYAMLFile_NonexistentFile(t *testing.T) {
+	_, err := parser.ParseYAMLFile("/tmp/definitely-does-not-exist-12345.yaml")
+	require.Error(t, err)
+}
+
+func TestParseYAMLFile_EmptyDocuments(t *testing.T) {
+	// YAML with empty documents separated by ---
+	yamlContent := `---
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: only-one
+---
+---
+`
+	tmpfile, err := os.CreateTemp("", "test-empty-docs-*.yaml")
+	require.NoError(t, err)
+	defer func() {
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			t.Logf("failed to remove temp file: %v", err)
+		}
+	}()
+
+	_, err = tmpfile.Write([]byte(yamlContent))
+	require.NoError(t, err)
+	require.NoError(t, tmpfile.Close())
+
+	objs, err := parser.ParseYAMLFile(tmpfile.Name())
+	require.NoError(t, err)
+	require.Len(t, objs, 1, "should skip empty documents and parse only the ConfigMap")
+	assert.Equal(t, "ConfigMap", objs[0].GetKind())
+}

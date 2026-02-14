@@ -129,7 +129,7 @@ func RenderChart(
 			addlInfo, pullErr := pullClient.Run(chartRef)
 			if pullErr != nil {
 				logger.WithError(pullErr).WithField("addInfo", addlInfo).Error("failed to pull chart using Helm pull action")
-				return "", fmt.Errorf("failed to pull chart: %w", pullErr)
+				return "", fmt.Errorf("failed to pull chart %q (version %q): %w", chartRef, version, pullErr)
 			}
 
 			/**

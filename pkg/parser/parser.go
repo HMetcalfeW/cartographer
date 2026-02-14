@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 
@@ -16,6 +17,10 @@ const (
 
 // ParseYAMLFile reads a YAML file and returns a slice of unstructured objects.
 func ParseYAMLFile(path string) ([]*unstructured.Unstructured, error) {
+	if path == "" {
+		return nil, fmt.Errorf("file path must not be empty")
+	}
+
 	logger := log.WithFields(log.Fields{
 		"func":     "ParseYAMLFile",
 		"filepath": path,
