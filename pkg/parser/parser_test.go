@@ -101,3 +101,55 @@ metadata:
 	require.Len(t, objs, 1, "should skip empty documents and parse only the ConfigMap")
 	assert.Equal(t, "ConfigMap", objs[0].GetKind())
 }
+
+func TestParseYAML(t *testing.T) {
+	yamlContent := []byte(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-deployment
+`)
+
+	objs, err := parser.ParseYAML(yamlContent)
+	require.NoError(t, err)
+	require.Len(t, objs, 2)
+
+	var foundPod, foundDeployment bool
+	for _, obj := range objs {
+		switch obj.GetKind() {
+		case "Pod":
+			foundPod = true
+		case "Deployment":
+			foundDeployment = true
+		}
+	}
+	assert.True(t, foundPod, "Expected to find a Pod object")
+	assert.True(t, foundDeployment, "Expected to find a Deployment object")
+}
+
+func TestParseYAML_EmptyInput(t *testing.T) {
+	objs, err := parser.ParseYAML([]byte{})
+	require.NoError(t, err)
+	assert.Empty(t, objs)
+}
+
+func TestParseYAML_EmptyDocuments(t *testing.T) {
+	yamlContent := []byte(`---
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: only-one
+---
+---
+`)
+	objs, err := parser.ParseYAML(yamlContent)
+	require.NoError(t, err)
+	require.Len(t, objs, 1, "should skip empty documents and parse only the ConfigMap")
+	assert.Equal(t, "ConfigMap", objs[0].GetKind())
+}

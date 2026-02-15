@@ -42,8 +42,12 @@ var AnalyzeCmd = &cobra.Command{
 			return fmt.Errorf("no input file or chart provided; please specify --input or --chart")
 		}
 
-		// variable storing the render Helm chart's k8s manifests
-		var k8sManifests string
+		// variable storing the raw YAML manifest bytes
+		var k8sManifests []byte
+
+		if namespace == "" {
+			namespace = DEFAULT_NAMESPACE
+		}
 
 		// If an input file is provided, read it.
 		if inputPath != "" {
@@ -51,11 +55,7 @@ var AnalyzeCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("failed to read input file: %w", err)
 			}
-			k8sManifests = string(data)
-		}
-
-		if namespace == "" {
-			namespace = DEFAULT_NAMESPACE
+			k8sManifests = data
 		}
 
 		// If a chart reference is provided, render it using the Helm SDK.
@@ -74,36 +74,13 @@ var AnalyzeCmd = &cobra.Command{
 				logger.WithError(err).Error("failed to render chart")
 				return err
 			}
-			k8sManifests = rendered
+			k8sManifests = []byte(rendered)
 		}
 
-		// Write the YAML content to a temporary file for parsing.
-		tmpFile, err := os.CreateTemp("", "analyze-rendered-*.yaml")
+		// Parse the YAML content directly from memory.
+		objs, err := parser.ParseYAML(k8sManifests)
 		if err != nil {
-			logger.WithError(err).Error("failed to create temporary file")
-			return err
-		}
-
-		defer func() {
-			if err := os.Remove(tmpFile.Name()); err != nil {
-				logger.WithError(err).Error("failed to remove tmp file")
-			}
-		}()
-
-		if _, err = tmpFile.Write([]byte(k8sManifests)); err != nil {
-			logger.WithError(err).Error("failed to write YAML content to temp file")
-			return err
-		}
-
-		if err := tmpFile.Close(); err != nil {
-			logger.WithError(err).Error("failed to close temp file")
-			return err
-		}
-
-		// Parse the YAML content.
-		objs, err := parser.ParseYAMLFile(tmpFile.Name())
-		if err != nil {
-			logger.WithError(err).Error("failed to parse YAML content in temp file")
+			logger.WithError(err).Error("failed to parse YAML content")
 			return err
 		}
 		log.Debugf("Parsed %d objects", len(objs))
