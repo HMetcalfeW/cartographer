@@ -46,15 +46,16 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 		}
 	}
 
-	// 3. Process label selectors for Service, NetworkPolicy, PodDisruptionBudget, etc.
+	// 3. Build a label index for O(n) selector lookups, then process selectors.
+	labelIdx := BuildLabelIndex(objs)
 	for _, obj := range objs {
 		switch obj.GetKind() {
 		case "Service":
-			handleServiceLabelSelector(obj, objs, dependencies)
+			handleServiceLabelSelector(obj, labelIdx, dependencies)
 		case "NetworkPolicy":
-			handleNetworkPolicy(obj, objs, dependencies)
+			handleNetworkPolicy(obj, labelIdx, dependencies)
 		case "PodDisruptionBudget":
-			handlePodDisruptionBudget(obj, objs, dependencies)
+			handlePodDisruptionBudget(obj, labelIdx, dependencies)
 		}
 	}
 

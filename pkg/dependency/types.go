@@ -58,6 +58,65 @@ func MapInterfaceToStringMap(in interface{}) map[string]string {
 	return out
 }
 
+// LabelIndex maps "key=value" strings to the set of pod/controller objects
+// carrying that label. Built once in BuildDependencies and used by
+// selector-based handlers for O(n) lookups instead of O(n²) scans.
+type LabelIndex map[string][]*unstructured.Unstructured
+
+// BuildLabelIndex creates a LabelIndex from a slice of objects, indexing only
+// Pods and controller types (Deployment, DaemonSet, etc.).
+func BuildLabelIndex(objs []*unstructured.Unstructured) LabelIndex {
+	idx := make(LabelIndex)
+	for _, obj := range objs {
+		if !IsPodOrController(obj) {
+			continue
+		}
+		for k, v := range obj.GetLabels() {
+			key := k + "=" + v
+			idx[key] = append(idx[key], obj)
+		}
+	}
+	return idx
+}
+
+// Match returns all pod/controller objects whose labels satisfy every key-value
+// pair in the selector. For a single-label selector this is a direct lookup;
+// for multi-label selectors it intersects the per-label sets.
+func (idx LabelIndex) Match(selector map[string]string) []*unstructured.Unstructured {
+	if len(selector) == 0 {
+		return nil
+	}
+
+	// Find the smallest candidate set to minimize intersection work.
+	var smallest []*unstructured.Unstructured
+	first := true
+	for k, v := range selector {
+		key := k + "=" + v
+		candidates := idx[key]
+		if len(candidates) == 0 {
+			return nil // no objects have this label — empty intersection
+		}
+		if first || len(candidates) < len(smallest) {
+			smallest = candidates
+			first = false
+		}
+	}
+
+	// Single-label fast path.
+	if len(selector) == 1 {
+		return smallest
+	}
+
+	// Multi-label: filter the smallest set to those matching all labels.
+	var result []*unstructured.Unstructured
+	for _, obj := range smallest {
+		if LabelsMatch(selector, obj.GetLabels()) {
+			result = append(result, obj)
+		}
+	}
+	return result
+}
+
 // deduplicateEdges removes duplicate edges based on ChildID+Reason.
 func deduplicateEdges(edges []Edge) []Edge {
 	seen := make(map[string]struct{}, len(edges))

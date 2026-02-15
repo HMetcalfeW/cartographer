@@ -11,7 +11,7 @@ import (
 // the Service's .spec.selector, and records each matching resource as a child with Reason="selector".
 func handleServiceLabelSelector(
 	svc *unstructured.Unstructured,
-	allObjs []*unstructured.Unstructured,
+	labelIdx LabelIndex,
 	deps map[string][]Edge,
 ) {
 	localLogger := log.WithField("func", "handleServiceLabelSelector")
@@ -30,18 +30,13 @@ func handleServiceLabelSelector(
 	}
 	selectorMap := MapInterfaceToStringMap(selObj)
 
-	for _, target := range allObjs {
-		if !IsPodOrController(target) {
-			continue
-		}
-		if LabelsMatch(selectorMap, target.GetLabels()) {
-			tgtID := ResourceID(target)
-			deps[svcID] = append(deps[svcID], Edge{ChildID: tgtID, Reason: "selector"})
-			localLogger.WithFields(log.Fields{
-				"serviceID": svcID,
-				"targetID":  tgtID,
-			}).Debug("Added service->target dependency")
-		}
+	for _, target := range labelIdx.Match(selectorMap) {
+		tgtID := ResourceID(target)
+		deps[svcID] = append(deps[svcID], Edge{ChildID: tgtID, Reason: "selector"})
+		localLogger.WithFields(log.Fields{
+			"serviceID": svcID,
+			"targetID":  tgtID,
+		}).Debug("Added service->target dependency")
 	}
 }
 
@@ -49,7 +44,7 @@ func handleServiceLabelSelector(
 // .spec.podSelector.matchLabels, and records each link as Reason="podSelector".
 func handleNetworkPolicy(
 	np *unstructured.Unstructured,
-	allObjs []*unstructured.Unstructured,
+	labelIdx LabelIndex,
 	deps map[string][]Edge,
 ) {
 	localLogger := log.WithField("func", "handleNetworkPolicy")
@@ -66,18 +61,13 @@ func handleNetworkPolicy(
 	selectorMap := MapInterfaceToStringMap(podSel)
 
 	if selFound && len(selectorMap) > 0 {
-		for _, obj := range allObjs {
-			if !IsPodOrController(obj) {
-				continue
-			}
-			if LabelsMatch(selectorMap, obj.GetLabels()) {
-				tgtID := ResourceID(obj)
-				deps[npID] = append(deps[npID], Edge{ChildID: tgtID, Reason: "podSelector"})
-				localLogger.WithFields(log.Fields{
-					"networkPolicy": npID,
-					"targetID":      tgtID,
-				}).Debug("Added networkpolicy->pod dependency")
-			}
+		for _, obj := range labelIdx.Match(selectorMap) {
+			tgtID := ResourceID(obj)
+			deps[npID] = append(deps[npID], Edge{ChildID: tgtID, Reason: "podSelector"})
+			localLogger.WithFields(log.Fields{
+				"networkPolicy": npID,
+				"targetID":      tgtID,
+			}).Debug("Added networkpolicy->pod dependency")
 		}
 	}
 }
@@ -86,7 +76,7 @@ func handleNetworkPolicy(
 // target objects (Pods, controllers) and creates an edge with Reason="pdbSelector".
 func handlePodDisruptionBudget(
 	pdb *unstructured.Unstructured,
-	allObjs []*unstructured.Unstructured,
+	labelIdx LabelIndex,
 	deps map[string][]Edge,
 ) {
 	localLogger := log.WithField("func", "handlePodDisruptionBudget")
@@ -103,18 +93,13 @@ func handlePodDisruptionBudget(
 	selMap := MapInterfaceToStringMap(selMapObj)
 
 	if selFound && len(selMap) > 0 {
-		for _, obj := range allObjs {
-			if !IsPodOrController(obj) {
-				continue
-			}
-			if LabelsMatch(selMap, obj.GetLabels()) {
-				tgtID := ResourceID(obj)
-				deps[pdbID] = append(deps[pdbID], Edge{ChildID: tgtID, Reason: "pdbSelector"})
-				localLogger.WithFields(log.Fields{
-					"pdb":    pdbID,
-					"target": tgtID,
-				}).Debug("Added pdb->pod/controller dependency")
-			}
+		for _, obj := range labelIdx.Match(selMap) {
+			tgtID := ResourceID(obj)
+			deps[pdbID] = append(deps[pdbID], Edge{ChildID: tgtID, Reason: "pdbSelector"})
+			localLogger.WithFields(log.Fields{
+				"pdb":    pdbID,
+				"target": tgtID,
+			}).Debug("Added pdb->pod/controller dependency")
 		}
 	}
 }
