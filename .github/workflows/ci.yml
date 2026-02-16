@@ -11,13 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: [1.24]
+        go-version: ["1.25"]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
 
@@ -28,15 +28,15 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4.3.0
         id: install
-        
+
       - name: Lint
         run: make lint
 
       - name: Test
         run: make test
 
-      - name: Build binaries
-        run: make docker
+      - name: Build
+        run: make build
 
       - name: Clean
         run: make clean

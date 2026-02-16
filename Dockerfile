@@ -1,16 +1,23 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-# Remove GOOS and GOARCH so buildx can set them appropriately
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /cartographer .
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-s -w \
+      -X github.com/HMetcalfeW/cartographer/cmd/version.Version=${VERSION} \
+      -X github.com/HMetcalfeW/cartographer/cmd/version.Commit=${COMMIT} \
+      -X github.com/HMetcalfeW/cartographer/cmd/version.Date=${DATE}" \
+    -o /cartographer .
 
 # Final stage
 FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates helm
+RUN mkdir /output
 COPY --from=builder /cartographer /usr/local/bin/cartographer
-RUN chmod +x /usr/local/bin/cartographer
-EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/cartographer"]
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

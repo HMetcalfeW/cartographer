@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/HMetcalfeW/cartographer/pkg/dependency"
+	"github.com/HMetcalfeW/cartographer/pkg/parser"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -256,4 +257,196 @@ func TestBuildDependencies(t *testing.T) {
 	require.Len(t, hpaEdges, 1)
 	assert.Equal(t, "Deployment/my-deploy", hpaEdges[0].ChildID)
 	assert.Equal(t, "scaleTargetRef", hpaEdges[0].Reason)
+}
+
+// TestBuildDependencies_IntegrationManifest tests the full pipeline: YAML parsing → dependency analysis.
+// This exercises the same code path as `cartographer analyze --input` without needing external files.
+func TestBuildDependencies_IntegrationManifest(t *testing.T) {
+	manifest := `
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: web-sa
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+type: Opaque
+data:
+  password: cGFzc3dvcmQ=
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tls-cert
+type: kubernetes.io/tls
+data:
+  tls.crt: ""
+  tls.key: ""
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  APP_ENV: production
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      serviceAccountName: web-sa
+      containers:
+        - name: web
+          image: nginx:latest
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
+          envFrom:
+            - configMapRef:
+                name: app-config
+      volumes:
+        - name: tls
+          secret:
+            secretName: tls-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-svc
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-ingress
+spec:
+  tls:
+    - secretName: tls-cert
+  rules:
+    - host: example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web-svc
+                port:
+                  number: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web
+  minReplicas: 2
+  maxReplicas: 10
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: web
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web-netpol
+spec:
+  podSelector:
+    matchLabels:
+      app: web
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: web
+`
+
+	objs, err := parser.ParseYAML([]byte(manifest))
+	require.NoError(t, err)
+	require.Len(t, objs, 10, "expected 10 resources in manifest")
+
+	deps := dependency.BuildDependencies(objs)
+
+	// Deployment → Secret (volume), Secret (env secretKeyRef), ConfigMap (envFrom), ServiceAccount
+	deployEdges := deps["Deployment/web"]
+	edgeSet := make(map[string]string)
+	for _, e := range deployEdges {
+		edgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "secretRef", edgeSet["Secret/tls-cert"], "Deployment should ref tls-cert volume")
+	assert.Equal(t, "secretRef", edgeSet["Secret/db-credentials"], "Deployment should ref db-credentials env")
+	assert.Equal(t, "configMapRef", edgeSet["ConfigMap/app-config"], "Deployment should ref app-config envFrom")
+	assert.Equal(t, "serviceAccountName", edgeSet["ServiceAccount/web-sa"], "Deployment should ref web-sa")
+
+	// Service → Deployment (selector)
+	svcEdges := deps["Service/web-svc"]
+	require.Len(t, svcEdges, 1)
+	assert.Equal(t, "Deployment/web", svcEdges[0].ChildID)
+	assert.Equal(t, "selector", svcEdges[0].Reason)
+
+	// Ingress → Service + TLS Secret
+	ingEdges := deps["Ingress/web-ingress"]
+	require.Len(t, ingEdges, 2)
+	ingEdgeSet := make(map[string]string)
+	for _, e := range ingEdges {
+		ingEdgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "ingressBackend", ingEdgeSet["Service/web-svc"])
+	assert.Equal(t, "tlsSecret", ingEdgeSet["Secret/tls-cert"])
+
+	// HPA → Deployment
+	hpaEdges := deps["HorizontalPodAutoscaler/web-hpa"]
+	require.Len(t, hpaEdges, 1)
+	assert.Equal(t, "Deployment/web", hpaEdges[0].ChildID)
+	assert.Equal(t, "scaleTargetRef", hpaEdges[0].Reason)
+
+	// PDB → Deployment (pdbSelector)
+	pdbEdges := deps["PodDisruptionBudget/web-pdb"]
+	require.Len(t, pdbEdges, 1)
+	assert.Equal(t, "Deployment/web", pdbEdges[0].ChildID)
+	assert.Equal(t, "pdbSelector", pdbEdges[0].Reason)
+
+	// NetworkPolicy → Deployment (podSelector)
+	npEdges := deps["NetworkPolicy/web-netpol"]
+	require.Len(t, npEdges, 1)
+	assert.Equal(t, "Deployment/web", npEdges[0].ChildID)
+	assert.Equal(t, "podSelector", npEdges[0].Reason)
+
+	// Verify DOT output is valid
+	dot := dependency.GenerateDOT(deps)
+	assert.Contains(t, dot, "digraph G {")
+	assert.Contains(t, dot, `"Service/web-svc" -> "Deployment/web"`)
+	assert.Contains(t, dot, `"Ingress/web-ingress" -> "Service/web-svc"`)
 }
