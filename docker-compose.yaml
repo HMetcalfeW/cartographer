@@ -1,8 +1,0 @@
-# version: "3.8" - the attribute `version` is obsolete
-
-services:
-  cartographer:
-    build: .
-    image: cartographer:<your_version>
-    container_name: cartographer
-    command: ["cartographer"]

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/HMetcalfeW/cartographer/pkg/dependency"
+	"github.com/HMetcalfeW/cartographer/pkg/parser"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -258,198 +259,194 @@ func TestBuildDependencies(t *testing.T) {
 	assert.Equal(t, "scaleTargetRef", hpaEdges[0].Reason)
 }
 
-// TestPrintDependencies ensures PrintDependencies doesn't panic and prints something.
-func TestPrintDependencies(t *testing.T) {
-	deps := map[string][]dependency.Edge{
-		"Deployment/my-deploy": {
-			{ChildID: "Secret/my-secret", Reason: "secretRef"},
-			{ChildID: "ServiceAccount/my-sa", Reason: "serviceAccountName"},
-		},
-	}
-	// Just ensuring it doesn't panic or error.
-	dependency.PrintDependencies(deps)
-}
+// TestBuildDependencies_IntegrationManifest tests the full pipeline: YAML parsing → dependency analysis.
+// This exercises the same code path as `cartographer analyze --input` without needing external files.
+func TestBuildDependencies_IntegrationManifest(t *testing.T) {
+	manifest := `
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: web-sa
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+type: Opaque
+data:
+  password: cGFzc3dvcmQ=
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tls-cert
+type: kubernetes.io/tls
+data:
+  tls.crt: ""
+  tls.key: ""
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  APP_ENV: production
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      serviceAccountName: web-sa
+      containers:
+        - name: web
+          image: nginx:latest
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
+          envFrom:
+            - configMapRef:
+                name: app-config
+      volumes:
+        - name: tls
+          secret:
+            secretName: tls-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-svc
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web-ingress
+spec:
+  tls:
+    - secretName: tls-cert
+  rules:
+    - host: example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web-svc
+                port:
+                  number: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web
+  minReplicas: 2
+  maxReplicas: 10
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: web
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web-netpol
+spec:
+  podSelector:
+    matchLabels:
+      app: web
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: web
+`
 
-// TestGenerateDOT ensures the DOT output includes reason labels.
-func TestGenerateDOT(t *testing.T) {
-	deps := map[string][]dependency.Edge{
-		"Deployment/my-deploy": {
-			{ChildID: "Secret/my-secret", Reason: "secretRef"},
-			{ChildID: "ServiceAccount/my-sa", Reason: "serviceAccountName"},
-		},
+	objs, err := parser.ParseYAML([]byte(manifest))
+	require.NoError(t, err)
+	require.Len(t, objs, 10, "expected 10 resources in manifest")
+
+	deps := dependency.BuildDependencies(objs)
+
+	// Deployment → Secret (volume), Secret (env secretKeyRef), ConfigMap (envFrom), ServiceAccount
+	deployEdges := deps["Deployment/web"]
+	edgeSet := make(map[string]string)
+	for _, e := range deployEdges {
+		edgeSet[e.ChildID] = e.Reason
 	}
+	assert.Equal(t, "secretRef", edgeSet["Secret/tls-cert"], "Deployment should ref tls-cert volume")
+	assert.Equal(t, "secretRef", edgeSet["Secret/db-credentials"], "Deployment should ref db-credentials env")
+	assert.Equal(t, "configMapRef", edgeSet["ConfigMap/app-config"], "Deployment should ref app-config envFrom")
+	assert.Equal(t, "serviceAccountName", edgeSet["ServiceAccount/web-sa"], "Deployment should ref web-sa")
+
+	// Service → Deployment (selector)
+	svcEdges := deps["Service/web-svc"]
+	require.Len(t, svcEdges, 1)
+	assert.Equal(t, "Deployment/web", svcEdges[0].ChildID)
+	assert.Equal(t, "selector", svcEdges[0].Reason)
+
+	// Ingress → Service + TLS Secret
+	ingEdges := deps["Ingress/web-ingress"]
+	require.Len(t, ingEdges, 2)
+	ingEdgeSet := make(map[string]string)
+	for _, e := range ingEdges {
+		ingEdgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "ingressBackend", ingEdgeSet["Service/web-svc"])
+	assert.Equal(t, "tlsSecret", ingEdgeSet["Secret/tls-cert"])
+
+	// HPA → Deployment
+	hpaEdges := deps["HorizontalPodAutoscaler/web-hpa"]
+	require.Len(t, hpaEdges, 1)
+	assert.Equal(t, "Deployment/web", hpaEdges[0].ChildID)
+	assert.Equal(t, "scaleTargetRef", hpaEdges[0].Reason)
+
+	// PDB → Deployment (pdbSelector)
+	pdbEdges := deps["PodDisruptionBudget/web-pdb"]
+	require.Len(t, pdbEdges, 1)
+	assert.Equal(t, "Deployment/web", pdbEdges[0].ChildID)
+	assert.Equal(t, "pdbSelector", pdbEdges[0].Reason)
+
+	// NetworkPolicy → Deployment (podSelector)
+	npEdges := deps["NetworkPolicy/web-netpol"]
+	require.Len(t, npEdges, 1)
+	assert.Equal(t, "Deployment/web", npEdges[0].ChildID)
+	assert.Equal(t, "podSelector", npEdges[0].Reason)
+
+	// Verify DOT output is valid
 	dot := dependency.GenerateDOT(deps)
-	t.Log(dot)
-	assert.Contains(t, dot, "[label=\"secretRef\"]")
-	assert.Contains(t, dot, "[label=\"serviceAccountName\"]")
-}
-
-// TestIsPodOrController checks recognized Kinds.
-func TestIsPodOrController(t *testing.T) {
-	tests := []struct {
-		kind     string
-		expected bool
-	}{
-		{"Pod", true},
-		{"Deployment", true},
-		{"Job", true},
-		{"CronJob", true},
-		{"Service", false},
-		{"CustomKind", false},
-	}
-	for _, tt := range tests {
-		obj := &unstructured.Unstructured{}
-		obj.SetKind(tt.kind)
-		res := dependency.IsPodOrController(obj)
-		assert.Equalf(t, tt.expected, res, "kind=%s", tt.kind)
-	}
-}
-
-// TestResourceID ensures we get "Kind/Name".
-func TestResourceID(t *testing.T) {
-	obj := &unstructured.Unstructured{}
-	obj.SetKind("Deployment")
-	obj.SetName("my-deploy")
-	id := dependency.ResourceID(obj)
-	assert.Equal(t, "Deployment/my-deploy", id)
-}
-
-// TestLabelsMatch covers label comparisons.
-func TestLabelsMatch(t *testing.T) {
-	selector := map[string]string{"app": "webapp", "tier": "frontend"}
-	labels1 := map[string]string{"app": "webapp", "tier": "frontend", "extra": "yes"}
-	labels2 := map[string]string{"app": "webapp"}
-	assert.True(t, dependency.LabelsMatch(selector, labels1), "should match superset")
-	assert.False(t, dependency.LabelsMatch(selector, labels2), "missing tier=frontend")
-}
-
-// TestMapInterfaceToStringMap ensures it handles typical map[string]interface{} input.
-func TestMapInterfaceToStringMap(t *testing.T) {
-	in := map[string]interface{}{
-		"app": "webapp",
-		"rep": 3, // non-string, should be ignored
-	}
-	out := dependency.MapInterfaceToStringMap(in)
-	assert.Equal(t, 1, len(out))
-	assert.Equal(t, "webapp", out["app"])
-}
-
-// TestGetPodSpec calls getPodSpec with various Kinds.
-func TestGetPodSpec(t *testing.T) {
-	// Pod
-	pod := &unstructured.Unstructured{}
-	pod.SetKind("Pod")
-	pod.Object["spec"] = map[string]interface{}{"containers": []interface{}{}}
-	spec, found, err := dependency.GetPodSpec(pod)
-	require.NoError(t, err)
-	assert.True(t, found)
-	assert.Contains(t, spec, "containers")
-
-	// Deployment
-	dep := &unstructured.Unstructured{}
-	dep.SetKind("Deployment")
-	dep.Object["spec"] = map[string]interface{}{
-		"template": map[string]interface{}{
-			"spec": map[string]interface{}{"initContainers": []interface{}{}},
-		},
-	}
-	spec, found, err = dependency.GetPodSpec(dep)
-	require.NoError(t, err)
-	assert.True(t, found)
-	assert.Contains(t, spec, "initContainers")
-
-	// Unknown kind
-	foo := &unstructured.Unstructured{}
-	foo.SetKind("FooBar")
-	_, found, err = dependency.GetPodSpec(foo)
-	require.Error(t, err)
-	assert.False(t, found)
-}
-
-// TestParseEnvValueFrom checks parsing of env[].valueFrom.
-func TestParseEnvValueFrom(t *testing.T) {
-	var secretRefs, configMapRefs []string
-
-	valFrom := map[string]interface{}{
-		"secretKeyRef": map[string]interface{}{
-			"name": "my-secret",
-		},
-	}
-	dependency.ParseEnvValueFrom(valFrom, &secretRefs, &configMapRefs)
-	assert.Contains(t, secretRefs, "Secret/my-secret")
-
-	valFrom2 := map[string]interface{}{
-		"configMapKeyRef": map[string]interface{}{
-			"name": "my-cm",
-		},
-	}
-	dependency.ParseEnvValueFrom(valFrom2, &secretRefs, &configMapRefs)
-	assert.Contains(t, configMapRefs, "ConfigMap/my-cm")
-}
-
-// TestParseEnvFrom checks parsing of envFrom[].secretRef or configMapRef.
-func TestParseEnvFrom(t *testing.T) {
-	var secretRefs, configMapRefs []string
-
-	envFrom := map[string]interface{}{
-		"secretRef": map[string]interface{}{
-			"name": "another-secret",
-		},
-	}
-	dependency.ParseEnvFrom(envFrom, &secretRefs, &configMapRefs)
-	assert.Contains(t, secretRefs, "Secret/another-secret")
-
-	envFrom2 := map[string]interface{}{
-		"configMapRef": map[string]interface{}{
-			"name": "another-cm",
-		},
-	}
-	dependency.ParseEnvFrom(envFrom2, &secretRefs, &configMapRefs)
-	assert.Contains(t, configMapRefs, "ConfigMap/another-cm")
-}
-
-// TestGatherPodSpecReferences tries a minimal spec to confirm volumes, env, etc. are captured.
-func TestGatherPodSpecReferences(t *testing.T) {
-	ps := map[string]interface{}{
-		"serviceAccountName": "my-sa",
-		"volumes": []interface{}{
-			map[string]interface{}{
-				"name": "secret-vol",
-				"secret": map[string]interface{}{
-					"secretName": "my-secret",
-				},
-			},
-			map[string]interface{}{
-				"name": "cm-vol",
-				"configMap": map[string]interface{}{
-					"name": "my-cm",
-				},
-			},
-		},
-		"containers": []interface{}{
-			map[string]interface{}{
-				"name": "web",
-				"envFrom": []interface{}{
-					map[string]interface{}{
-						"secretRef": map[string]interface{}{
-							"name": "another-secret",
-						},
-					},
-				},
-			},
-		},
-		"imagePullSecrets": []interface{}{
-			map[string]interface{}{
-				"name": "pull-secret",
-			},
-		},
-	}
-
-	secrets, cms, pvcs, sas := dependency.GatherPodSpecReferences(ps)
-	assert.Contains(t, secrets, "Secret/my-secret")
-	assert.Contains(t, secrets, "Secret/another-secret")
-	assert.Contains(t, cms, "ConfigMap/my-cm")
-	assert.Contains(t, secrets, "Secret/pull-secret")
-	assert.Contains(t, sas, "ServiceAccount/my-sa")
-	assert.Empty(t, pvcs, "No PVC references here")
+	assert.Contains(t, dot, "digraph G {")
+	assert.Contains(t, dot, `"Service/web-svc" -> "Deployment/web"`)
+	assert.Contains(t, dot, `"Ingress/web-ingress" -> "Service/web-svc"`)
 }

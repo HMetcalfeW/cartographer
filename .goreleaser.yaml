@@ -1,0 +1,41 @@
+version: 2
+
+builds:
+  - id: cartographer
+    main: .
+    binary: cartographer
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/HMetcalfeW/cartographer/cmd/version.Version={{.Version}}
+      - -X github.com/HMetcalfeW/cartographer/cmd/version.Commit={{.Commit}}
+      - -X github.com/HMetcalfeW/cartographer/cmd/version.Date={{.Date}}
+
+archives:
+  - id: cartographer
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"

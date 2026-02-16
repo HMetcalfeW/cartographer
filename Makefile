@@ -2,8 +2,11 @@
 
 BINARY_NAME=cartographer
 VERSION=$(shell git describe --tags --always 2>/dev/null || echo "dev")
+COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+DATE=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 BUILD_DIR=build
-LDFLAGS=-ldflags="-X main.version=$(VERSION)"
+VERSION_PKG=github.com/HMetcalfeW/cartographer/cmd/version
+LDFLAGS=-ldflags="-s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).Date=$(DATE)"
 
 # Targets
 .PHONY: all deps update-deps clean lint test coverhtml build docker
@@ -53,6 +56,11 @@ build:
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/darwin_arm64/$(BINARY_NAME) .
 	@echo "Build complete."
 
-# Use a multi-stage Dockerfile for a minimal runtime image
-docker: build
-	docker build --platform linux/amd64 -t cartographer:$(VERSION) .
+# Build Docker image for the host platform
+docker:
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg DATE=$(DATE) \
+		-t cartographer:$(VERSION) \
+		-t cartographer:latest .

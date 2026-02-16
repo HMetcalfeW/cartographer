@@ -31,18 +31,17 @@ Cartographer is a lightweight CLI tool written in Go that analyzes and visualize
   - Built with [Cobra](https://github.com/spf13/cobra) for intuitive subcommands and flags.
   - Uses [Viper](https://github.com/spf13/viper) for flexible configuration (e.g., reading from config files or environment variables).
 
-- **Containerized Deployment**  
-  - Dockerfile and docker-compose configuration for building and running Cartographer in a containerized environment.
+- **Containerized Deployment**
+  - Dockerfile for building and running Cartographer in a containerized environment.
   - Make targets for multi-platform builds (e.g., Linux, Mac ARM).
 
 ## Installation
 
 ### Prerequisites
 
-- **Go 1.23+** (modules enabled)
+- **Go 1.25+** (modules enabled)
 - **Helm** (if using Helm chart ingestion)
-- **Docker** (for containerized builds)
-- **Docker Compose** (optional, for multi-container setups)
+- **Docker** (optional, for containerized builds)
 - **Graphviz** (to visualize DOT output, installed via `brew install graphviz` on macOS or your preferred package manager)
 
 ### Clone the Repository
@@ -83,8 +82,14 @@ Cartographer offers a flexible CLI with an analyze subcommand using the Helm SDK
 - `--release`: Name for the Helm release (defaults to `cartographer-release`).
 - `--version`: The Helm Chart version you wish to use.
 - `--output-format=dot`: Generate DOT output to stdout or to a file with `--output-file`.
-- `--output-file`: Location to store the output DOT file
+- `--output-file`: Location to store the output DOT file.
 - `--config`: (Optional) Path to a configuration file for advanced settings.
+
+#### Version
+```bash
+cartographer version
+```
+Prints the version, commit hash, and build date.
 
 #### 1. Analyze Kubernetes Manifests from YAML
 
@@ -142,6 +147,27 @@ dot -Tpng bitnami-metallb.dot -o bitnami-metallb.png
 #### DOT File Visualized with GraphViz
 ![cart-gopher logo](assets/bitnami-metallb.png)
 
+## Supported Resource Types
+
+Cartographer detects dependencies across the following Kubernetes resource types:
+
+| Resource | Dependencies Detected |
+|---|---|
+| Deployment, DaemonSet, StatefulSet, Job, CronJob, Pod, ReplicaSet | Secrets, ConfigMaps, PVCs, ServiceAccounts, imagePullSecrets (via pod spec) |
+| Service | Pod/controller targets (via label selector) |
+| Ingress | Backend Services, TLS Secrets |
+| NetworkPolicy | Pod/controller targets (via podSelector) |
+| PodDisruptionBudget | Pod/controller targets (via selector) |
+| HorizontalPodAutoscaler | Scale target (via scaleTargetRef) |
+| Any resource | Owner references (ownerRef) |
+
+## Known Limitations
+
+- **No CRD support** — Custom Resource Definitions are parsed but their internal references are not analyzed.
+- **No cross-namespace resolution** — All resources are assumed to be in the same namespace.
+- **matchLabels only** — Label selectors use `matchLabels`; `matchExpressions` are not yet supported.
+- **No Kustomize support** — Only raw YAML files and Helm charts are supported as input.
+
 ## Configuration
 The default location of cartographer's configuration file if the `--config` flag is undefined is `$HOME/.cartographer.yaml`
 
@@ -175,26 +201,57 @@ make build
 ```
 The binary is placed in the build/ directory.
 
-### Docker & Docker Compose
+### Docker
 Cartographer can be containerized for easy deployment or CI/CD usage.
 
-#### Docker
+#### Build the Image
 ```bash
 make docker
 ```
-Builds a Docker image (e.g., cartographer:latest). You can run it like so:
+
+#### Analyze a Local Manifest
+Mount your manifest file and an output directory:
 ```bash
-docker run --rm cartographer:latest analyze --input /manifests/test.yaml
+docker run --rm \
+  -v /path/to/manifest.yaml:/input/manifest.yaml \
+  -v $(pwd)/output:/output \
+  cartographer:latest analyze --input /input/manifest.yaml --output-file /output/graph.dot
 ```
 
-#### Docker Compose
+#### Analyze a Helm Chart
+Pass Helm repos via the `HELM_REPOS` environment variable (comma-separated `name=url` pairs):
 ```bash
-docker compose up
+docker run --rm \
+  -e HELM_REPOS="bitnami=https://charts.bitnami.com/bitnami" \
+  -v $(pwd)/output:/output \
+  cartographer:latest analyze --chart bitnami/nginx --output-file /output/nginx.dot
 ```
-Runs Cartographer in a container, optionally alongside other services you define. An example docker-compose.yaml has been provided.
 
-## Versioning
-Cartographer uses a `VERSION` file in the root directory. The Makefile reads this to inject version metadata at build time (e.g., `-ldflags -X main.Version=$(VERSION)`).
+#### Analyze a Helm Chart with Custom Values
+Mount your values file into the container:
+```bash
+docker run --rm \
+  -e HELM_REPOS="bitnami=https://charts.bitnami.com/bitnami" \
+  -v /path/to/values.yaml:/input/values.yaml \
+  -v $(pwd)/output:/output \
+  cartographer:latest analyze --chart bitnami/postgresql --values /input/values.yaml --output-file /output/postgresql.dot
+```
+
+## Releasing
+
+Cartographer uses [GoReleaser](https://goreleaser.com/) for automated releases. Pushing a version tag triggers the GitHub Actions release pipeline, which builds cross-platform binaries and creates a GitHub Release.
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This will:
+1. Build binaries for Linux, macOS, and Windows (amd64 + arm64)
+2. Inject version, commit, and build date via `-ldflags`
+3. Create a GitHub Release with archives and checksums
+
+Run `cartographer version` to verify the build info.
 
 ## Contributing
 Contributions are welcome! If you find a bug or have an improvement, feel free to:

@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/viper"
 
 	analyze "github.com/HMetcalfeW/cartographer/cmd/analyze"
+	versionCmd "github.com/HMetcalfeW/cartographer/cmd/version"
 )
 
 var cfgFile string
@@ -41,8 +42,9 @@ func init() {
 	// Set the log level to info (you can adjust this as needed).
 	log.SetLevel(log.InfoLevel)
 
-	// Register the analyze subcommand explicitly.
+	// Register subcommands.
 	RootCmd.AddCommand(analyze.AnalyzeCmd)
+	RootCmd.AddCommand(versionCmd.VersionCmd)
 
 	log.WithField("func", "root.init").Debug("root initialization complete")
 }
@@ -62,7 +64,7 @@ func initConfig() {
 	if err := viper.ReadInConfig(); err == nil {
 		logger.Info("Using config file:", viper.ConfigFileUsed())
 	} else {
-		logger.WithError(err).Info("Error")
+		logger.WithError(err).Warn("Could not read config file, using defaults")
 	}
 
 	// Now update the logging level based on the configuration.
