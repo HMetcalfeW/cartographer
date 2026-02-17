@@ -32,6 +32,19 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+brews:
+  - repository:
+      owner: HMetcalfeW
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/HMetcalfeW/cartographer"
+    description: "CLI tool for visualizing Kubernetes resource dependencies as DOT graphs"
+    license: "Apache-2.0"
+    install: |
+      bin.install "cartographer"
+    test: |
+      system "#{bin}/cartographer", "version"
+
 changelog:
   sort: asc
   filters:
