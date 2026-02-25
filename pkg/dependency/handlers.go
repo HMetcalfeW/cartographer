@@ -41,7 +41,8 @@ func handleServiceLabelSelector(
 }
 
 // handleNetworkPolicy finds Pods or controllers whose labels match
-// .spec.podSelector.matchLabels, and records each link as Reason="podSelector".
+// .spec.podSelector (both matchLabels and matchExpressions), and records
+// each link as Reason="podSelector".
 func handleNetworkPolicy(
 	np *unstructured.Unstructured,
 	labelIdx LabelIndex,
@@ -57,23 +58,36 @@ func handleNetworkPolicy(
 	if !found {
 		return
 	}
-	podSel, selFound, _ := unstructured.NestedMap(spec, "podSelector", "matchLabels")
-	selectorMap := MapInterfaceToStringMap(podSel)
 
-	if selFound && len(selectorMap) > 0 {
-		for _, obj := range labelIdx.Match(selectorMap) {
-			tgtID := ResourceID(obj)
-			deps[npID] = append(deps[npID], Edge{ChildID: tgtID, Reason: "podSelector"})
-			localLogger.WithFields(log.Fields{
-				"networkPolicy": npID,
-				"targetID":      tgtID,
-			}).Debug("Added networkpolicy->pod dependency")
-		}
+	// Extract the full podSelector map.
+	podSelector, psFound, _ := unstructured.NestedMap(spec, "podSelector")
+	if !psFound || len(podSelector) == 0 {
+		return
+	}
+
+	// matchLabels (may be empty/absent).
+	mlRaw, _, _ := unstructured.NestedMap(podSelector, "matchLabels")
+	matchLabels := MapInterfaceToStringMap(mlRaw)
+
+	// matchExpressions (may be empty/absent).
+	matchExprs := ExtractMatchExpressions(podSelector)
+
+	if len(matchLabels) == 0 && len(matchExprs) == 0 {
+		return
+	}
+
+	for _, obj := range labelIdx.MatchSelector(matchLabels, matchExprs) {
+		tgtID := ResourceID(obj)
+		deps[npID] = append(deps[npID], Edge{ChildID: tgtID, Reason: "podSelector"})
+		localLogger.WithFields(log.Fields{
+			"networkPolicy": npID,
+			"targetID":      tgtID,
+		}).Debug("Added networkpolicy->pod dependency")
 	}
 }
 
-// handlePodDisruptionBudget processes .spec.selector.matchLabels to find
-// target objects (Pods, controllers) and creates an edge with Reason="pdbSelector".
+// handlePodDisruptionBudget processes .spec.selector (both matchLabels and
+// matchExpressions) to find target objects and creates edges with Reason="pdbSelector".
 func handlePodDisruptionBudget(
 	pdb *unstructured.Unstructured,
 	labelIdx LabelIndex,
@@ -89,18 +103,31 @@ func handlePodDisruptionBudget(
 	if !found {
 		return
 	}
-	selMapObj, selFound, _ := unstructured.NestedMap(spec, "selector", "matchLabels")
-	selMap := MapInterfaceToStringMap(selMapObj)
 
-	if selFound && len(selMap) > 0 {
-		for _, obj := range labelIdx.Match(selMap) {
-			tgtID := ResourceID(obj)
-			deps[pdbID] = append(deps[pdbID], Edge{ChildID: tgtID, Reason: "pdbSelector"})
-			localLogger.WithFields(log.Fields{
-				"pdb":    pdbID,
-				"target": tgtID,
-			}).Debug("Added pdb->pod/controller dependency")
-		}
+	// Extract the full selector map.
+	selector, selFound, _ := unstructured.NestedMap(spec, "selector")
+	if !selFound || len(selector) == 0 {
+		return
+	}
+
+	// matchLabels (may be empty/absent).
+	mlRaw, _, _ := unstructured.NestedMap(selector, "matchLabels")
+	matchLabels := MapInterfaceToStringMap(mlRaw)
+
+	// matchExpressions (may be empty/absent).
+	matchExprs := ExtractMatchExpressions(selector)
+
+	if len(matchLabels) == 0 && len(matchExprs) == 0 {
+		return
+	}
+
+	for _, obj := range labelIdx.MatchSelector(matchLabels, matchExprs) {
+		tgtID := ResourceID(obj)
+		deps[pdbID] = append(deps[pdbID], Edge{ChildID: tgtID, Reason: "pdbSelector"})
+		localLogger.WithFields(log.Fields{
+			"pdb":    pdbID,
+			"target": tgtID,
+		}).Debug("Added pdb->pod/controller dependency")
 	}
 }
 

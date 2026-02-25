@@ -450,3 +450,197 @@ spec:
 	assert.Contains(t, dot, `"Service/web-svc" -> "Deployment/web"`)
 	assert.Contains(t, dot, `"Ingress/web-ingress" -> "Service/web-svc"`)
 }
+
+// TestBuildDependencies_MatchExpressions tests matchExpressions across multiple
+// resource types with various operators.
+func TestBuildDependencies_MatchExpressions(t *testing.T) {
+	manifest := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+    tier: frontend
+    env: prod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    app: api
+    tier: backend
+    env: prod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app: worker
+    tier: backend
+    env: staging
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prod-only
+spec:
+  podSelector:
+    matchExpressions:
+      - key: env
+        operator: In
+        values: [prod]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      tier: backend
+    matchExpressions:
+      - key: env
+        operator: NotIn
+        values: [staging]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: all-with-app
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: Exists
+`
+
+	objs, err := parser.ParseYAML([]byte(manifest))
+	require.NoError(t, err)
+	require.Len(t, objs, 6)
+
+	deps := dependency.BuildDependencies(objs)
+
+	// NetworkPolicy/prod-only → web + api (env In [prod])
+	npProdEdges := deps["NetworkPolicy/prod-only"]
+	require.Len(t, npProdEdges, 2, "prod-only should match web and api")
+	npProdTargets := map[string]bool{}
+	for _, e := range npProdEdges {
+		npProdTargets[e.ChildID] = true
+		assert.Equal(t, "podSelector", e.Reason)
+	}
+	assert.True(t, npProdTargets["Deployment/web"])
+	assert.True(t, npProdTargets["Deployment/api"])
+	assert.False(t, npProdTargets["Deployment/worker"])
+
+	// PDB/backend-pdb → api only (tier=backend AND env NotIn [staging])
+	pdbEdges := deps["PodDisruptionBudget/backend-pdb"]
+	require.Len(t, pdbEdges, 1, "backend-pdb: tier=backend AND env NotIn [staging] → api only")
+	assert.Equal(t, "Deployment/api", pdbEdges[0].ChildID)
+	assert.Equal(t, "pdbSelector", pdbEdges[0].Reason)
+
+	// NetworkPolicy/all-with-app → web + api + worker (app Exists)
+	npAllEdges := deps["NetworkPolicy/all-with-app"]
+	require.Len(t, npAllEdges, 3, "all-with-app should match all three deployments")
+}
+
+// TestBuildDependencies_HelmStyleMatchExpressions exercises matchExpressions
+// with app.kubernetes.io/* labels typical of Bitnami/Helm charts.
+func TestBuildDependencies_HelmStyleMatchExpressions(t *testing.T) {
+	manifest := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-master
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: master
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-replicas
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: replica
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: primary
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-master-only
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [master]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-all
+spec:
+  minAvailable: 1
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [redis]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: not-postgres
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: NotIn
+        values: [postgres]
+`
+
+	objs, err := parser.ParseYAML([]byte(manifest))
+	require.NoError(t, err)
+	require.Len(t, objs, 6)
+
+	deps := dependency.BuildDependencies(objs)
+
+	// redis-master-only → only redis-master (name=redis AND component In [master])
+	npMasterEdges := deps["NetworkPolicy/redis-master-only"]
+	require.Len(t, npMasterEdges, 1)
+	assert.Equal(t, "Deployment/redis-master", npMasterEdges[0].ChildID)
+
+	// redis-all PDB → both redis deployments
+	pdbEdges := deps["PodDisruptionBudget/redis-all"]
+	require.Len(t, pdbEdges, 2, "redis-all should match redis-master and redis-replicas")
+	pdbTargets := map[string]bool{}
+	for _, e := range pdbEdges {
+		pdbTargets[e.ChildID] = true
+	}
+	assert.True(t, pdbTargets["Deployment/redis-master"])
+	assert.True(t, pdbTargets["Deployment/redis-replicas"])
+	assert.False(t, pdbTargets["Deployment/postgres"])
+
+	// not-postgres → redis-master + redis-replicas (NotIn [postgres])
+	npNotPgEdges := deps["NetworkPolicy/not-postgres"]
+	require.Len(t, npNotPgEdges, 2)
+	npNotPgTargets := map[string]bool{}
+	for _, e := range npNotPgEdges {
+		npNotPgTargets[e.ChildID] = true
+	}
+	assert.True(t, npNotPgTargets["Deployment/redis-master"])
+	assert.True(t, npNotPgTargets["Deployment/redis-replicas"])
+}

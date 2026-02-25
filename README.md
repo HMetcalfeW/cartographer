@@ -18,7 +18,7 @@ Cartographer is a lightweight CLI tool written in Go that analyzes and visualize
   - Detect references such as:
     - **Owner References** (e.g., Deployment owned by a HelmRelease).
     - **Pod Spec References** (Secrets, ConfigMaps, PVCs, ServiceAccounts, imagePullSecrets).
-    - **Label Selectors** (Service → Pod, NetworkPolicy → Pod, PodDisruptionBudget → Pod).
+    - **Label Selectors** (Service → Pod, NetworkPolicy → Pod, PodDisruptionBudget → Pod), including full `matchExpressions` support (In, NotIn, Exists, DoesNotExist).
     - **Ingress** routes (Ingress → Service → TLS Secret).
     - **HPA** scale targets (HPA → Deployment).
   - Each edge is annotated with a **reason** (e.g., `ownerRef`, `secretRef`, `selector`) to clarify how resources are connected.
@@ -160,8 +160,8 @@ Cartographer detects dependencies across the following Kubernetes resource types
 | Deployment, DaemonSet, StatefulSet, Job, CronJob, Pod, ReplicaSet | Secrets, ConfigMaps, PVCs, ServiceAccounts, imagePullSecrets (via pod spec) |
 | Service | Pod/controller targets (via label selector) |
 | Ingress | Backend Services, TLS Secrets |
-| NetworkPolicy | Pod/controller targets (via podSelector) |
-| PodDisruptionBudget | Pod/controller targets (via selector) |
+| NetworkPolicy | Pod/controller targets (via podSelector with matchLabels + matchExpressions) |
+| PodDisruptionBudget | Pod/controller targets (via selector with matchLabels + matchExpressions) |
 | HorizontalPodAutoscaler | Scale target (via scaleTargetRef) |
 | Any resource | Owner references (ownerRef) |
 
@@ -179,7 +179,6 @@ Cartographer detects dependencies across the following Kubernetes resource types
 
 - **No CRD support** — Custom Resource Definitions are parsed but their internal references are not analyzed.
 - **No cross-namespace resolution** — All resources are assumed to be in the same namespace.
-- **matchLabels only** — Label selectors use `matchLabels`; `matchExpressions` are not yet supported.
 - **No Kustomize support** — Only raw YAML files and Helm charts are supported as input.
 
 ## Configuration

@@ -43,6 +43,91 @@ func LabelsMatch(selector, labels map[string]string) bool {
 	return true
 }
 
+// LabelSelectorRequirement represents a single matchExpressions entry from a
+// Kubernetes LabelSelector. Operator must be one of: In, NotIn, Exists, DoesNotExist.
+type LabelSelectorRequirement struct {
+	Key      string
+	Operator string
+	Values   []string
+}
+
+// MatchesExpressions returns true if the given labels satisfy every requirement.
+// An empty expression list is vacuously true. All expressions are ANDed together
+// per the Kubernetes LabelSelector spec.
+func MatchesExpressions(exprs []LabelSelectorRequirement, labels map[string]string) bool {
+	for _, expr := range exprs {
+		val, exists := labels[expr.Key]
+		switch expr.Operator {
+		case "In":
+			if !exists || !stringInSlice(val, expr.Values) {
+				return false
+			}
+		case "NotIn":
+			if exists && stringInSlice(val, expr.Values) {
+				return false
+			}
+		case "Exists":
+			if !exists {
+				return false
+			}
+		case "DoesNotExist":
+			if exists {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func stringInSlice(s string, list []string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// ExtractMatchExpressions reads the "matchExpressions" field from an
+// unstructured selector map (e.g. the result of NestedMap for "podSelector"
+// or "selector") and returns a typed slice. Malformed entries are skipped.
+func ExtractMatchExpressions(selectorMap map[string]interface{}) []LabelSelectorRequirement {
+	raw, ok := selectorMap["matchExpressions"]
+	if !ok {
+		return nil
+	}
+	items, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	var result []LabelSelectorRequirement
+	for _, item := range items {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		key, _ := m["key"].(string)
+		operator, _ := m["operator"].(string)
+		if key == "" || operator == "" {
+			continue
+		}
+		var values []string
+		if rawVals, ok := m["values"].([]interface{}); ok {
+			for _, rv := range rawVals {
+				if s, ok := rv.(string); ok {
+					values = append(values, s)
+				}
+			}
+		}
+		result = append(result, LabelSelectorRequirement{
+			Key:      key,
+			Operator: operator,
+			Values:   values,
+		})
+	}
+	return result
+}
+
 // MapInterfaceToStringMap attempts to cast an interface{} to map[string]interface{},
 // then converts each value to a string if possible. Useful for label selectors
 // or other fields that store data as map[string]interface{}.
@@ -111,6 +196,50 @@ func (idx LabelIndex) Match(selector map[string]string) []*unstructured.Unstruct
 	var result []*unstructured.Unstructured
 	for _, obj := range smallest {
 		if LabelsMatch(selector, obj.GetLabels()) {
+			result = append(result, obj)
+		}
+	}
+	return result
+}
+
+// MatchSelector returns all pod/controller objects whose labels satisfy both
+// the matchLabels map AND every matchExpressions requirement. If matchLabels
+// is non-empty it narrows candidates via the index first; if only expressions
+// are provided it scans all indexed objects.
+func (idx LabelIndex) MatchSelector(matchLabels map[string]string, exprs []LabelSelectorRequirement) []*unstructured.Unstructured {
+	if len(matchLabels) == 0 && len(exprs) == 0 {
+		return nil
+	}
+
+	var candidates []*unstructured.Unstructured
+
+	if len(matchLabels) > 0 {
+		// Use the existing optimised index lookup for matchLabels.
+		candidates = idx.Match(matchLabels)
+		if len(candidates) == 0 {
+			return nil
+		}
+	} else {
+		// No matchLabels — collect all unique indexed objects as candidates.
+		seen := make(map[string]struct{})
+		for _, objs := range idx {
+			for _, obj := range objs {
+				id := ResourceID(obj)
+				if _, exists := seen[id]; !exists {
+					seen[id] = struct{}{}
+					candidates = append(candidates, obj)
+				}
+			}
+		}
+	}
+
+	if len(exprs) == 0 {
+		return candidates
+	}
+
+	var result []*unstructured.Unstructured
+	for _, obj := range candidates {
+		if MatchesExpressions(exprs, obj.GetLabels()) {
 			result = append(result, obj)
 		}
 	}

@@ -316,6 +316,195 @@ func TestHPAMissingScaleTarget(t *testing.T) {
 	assert.Empty(t, deps["HorizontalPodAutoscaler/empty-hpa"])
 }
 
+// TestNetworkPolicyMatchExpressions verifies NetworkPolicy with matchExpressions.
+func TestNetworkPolicyMatchExpressions(t *testing.T) {
+	// Three Deployments with different labels
+	web := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]interface{}{
+				"name":   "web",
+				"labels": map[string]interface{}{"app": "web", "env": "prod"},
+			},
+		},
+	}
+	api := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]interface{}{
+				"name":   "api",
+				"labels": map[string]interface{}{"app": "api", "env": "prod"},
+			},
+		},
+	}
+	worker := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]interface{}{
+				"name":   "worker",
+				"labels": map[string]interface{}{"app": "worker", "env": "staging"},
+			},
+		},
+	}
+
+	// NetworkPolicy with In expression — should match web + api (env=prod)
+	npIn := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.k8s.io/v1",
+			"kind":       "NetworkPolicy",
+			"metadata":   map[string]interface{}{"name": "prod-only"},
+			"spec": map[string]interface{}{
+				"podSelector": map[string]interface{}{
+					"matchExpressions": []interface{}{
+						map[string]interface{}{
+							"key": "env", "operator": "In", "values": []interface{}{"prod"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{npIn, web, api, worker})
+	npEdges := deps["NetworkPolicy/prod-only"]
+	require.Len(t, npEdges, 2, "should match web and api")
+	names := map[string]bool{}
+	for _, e := range npEdges {
+		names[e.ChildID] = true
+		assert.Equal(t, "podSelector", e.Reason)
+	}
+	assert.True(t, names["Deployment/web"])
+	assert.True(t, names["Deployment/api"])
+
+	// NetworkPolicy with NotIn — should exclude worker (env=staging)
+	npNotIn := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.k8s.io/v1",
+			"kind":       "NetworkPolicy",
+			"metadata":   map[string]interface{}{"name": "not-staging"},
+			"spec": map[string]interface{}{
+				"podSelector": map[string]interface{}{
+					"matchExpressions": []interface{}{
+						map[string]interface{}{
+							"key": "env", "operator": "NotIn", "values": []interface{}{"staging"},
+						},
+					},
+				},
+			},
+		},
+	}
+	deps = dependency.BuildDependencies([]*unstructured.Unstructured{npNotIn, web, api, worker})
+	npEdges = deps["NetworkPolicy/not-staging"]
+	require.Len(t, npEdges, 2, "should match web and api, not worker")
+
+	// NetworkPolicy with mixed matchLabels + matchExpressions
+	npMixed := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.k8s.io/v1",
+			"kind":       "NetworkPolicy",
+			"metadata":   map[string]interface{}{"name": "prod-web"},
+			"spec": map[string]interface{}{
+				"podSelector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{"env": "prod"},
+					"matchExpressions": []interface{}{
+						map[string]interface{}{
+							"key": "app", "operator": "In", "values": []interface{}{"web"},
+						},
+					},
+				},
+			},
+		},
+	}
+	deps = dependency.BuildDependencies([]*unstructured.Unstructured{npMixed, web, api, worker})
+	npEdges = deps["NetworkPolicy/prod-web"]
+	require.Len(t, npEdges, 1, "only web matches env=prod AND app In [web]")
+	assert.Equal(t, "Deployment/web", npEdges[0].ChildID)
+
+	// NetworkPolicy with Exists
+	npExists := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.k8s.io/v1",
+			"kind":       "NetworkPolicy",
+			"metadata":   map[string]interface{}{"name": "has-app"},
+			"spec": map[string]interface{}{
+				"podSelector": map[string]interface{}{
+					"matchExpressions": []interface{}{
+						map[string]interface{}{"key": "app", "operator": "Exists"},
+					},
+				},
+			},
+		},
+	}
+	deps = dependency.BuildDependencies([]*unstructured.Unstructured{npExists, web, api, worker})
+	assert.Len(t, deps["NetworkPolicy/has-app"], 3, "all three have the app label")
+}
+
+// TestPodDisruptionBudgetMatchExpressions verifies PDB with matchExpressions.
+func TestPodDisruptionBudgetMatchExpressions(t *testing.T) {
+	master := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]interface{}{
+				"name":   "redis-master",
+				"labels": map[string]interface{}{"app": "redis", "component": "master"},
+			},
+		},
+	}
+	replica := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]interface{}{
+				"name":   "redis-replica",
+				"labels": map[string]interface{}{"app": "redis", "component": "replica"},
+			},
+		},
+	}
+
+	// PDB with matchExpressions only
+	pdb := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy/v1",
+			"kind":       "PodDisruptionBudget",
+			"metadata":   map[string]interface{}{"name": "redis-pdb"},
+			"spec": map[string]interface{}{
+				"selector": map[string]interface{}{
+					"matchExpressions": []interface{}{
+						map[string]interface{}{
+							"key": "app", "operator": "In", "values": []interface{}{"redis"},
+						},
+					},
+				},
+			},
+		},
+	}
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{pdb, master, replica})
+	pdbEdges := deps["PodDisruptionBudget/redis-pdb"]
+	require.Len(t, pdbEdges, 2, "should match both redis deployments")
+
+	// PDB with combined matchLabels + matchExpressions
+	pdbMixed := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy/v1",
+			"kind":       "PodDisruptionBudget",
+			"metadata":   map[string]interface{}{"name": "redis-master-pdb"},
+			"spec": map[string]interface{}{
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{"app": "redis"},
+					"matchExpressions": []interface{}{
+						map[string]interface{}{
+							"key": "component", "operator": "In", "values": []interface{}{"master"},
+						},
+					},
+				},
+			},
+		},
+	}
+	deps = dependency.BuildDependencies([]*unstructured.Unstructured{pdbMixed, master, replica})
+	pdbEdges = deps["PodDisruptionBudget/redis-master-pdb"]
+	require.Len(t, pdbEdges, 1, "only master matches app=redis AND component In [master]")
+	assert.Equal(t, "Deployment/redis-master", pdbEdges[0].ChildID)
+}
+
 // TestLabelIndexMatch verifies the label index lookup directly.
 func TestLabelIndexMatch(t *testing.T) {
 	deploy := &unstructured.Unstructured{
