@@ -2,7 +2,7 @@
 
 # Cartographer
 
-Cartographer is a lightweight CLI tool written in Go that analyzes and visualizes relationships between Kubernetes resources in a DOT file. It ingests Kubernetes manifests—either from YAML files or via the Helm SDK—and produces dependency graphs to help you understand and document your application's architecture. The DOT file output can be run through a visualizer like GraphViz.
+Cartographer is a lightweight CLI tool written in Go that analyzes and visualizes relationships between Kubernetes resources. It ingests Kubernetes manifests—either from YAML files or via the Helm SDK—and produces dependency graphs in multiple formats (DOT, Mermaid, JSON, PNG, SVG) to help you understand and document your application's architecture.
 
 ## Features
 
@@ -23,8 +23,11 @@ Cartographer is a lightweight CLI tool written in Go that analyzes and visualize
     - **HPA** scale targets (HPA → Deployment).
   - Each edge is annotated with a **reason** (e.g., `ownerRef`, `secretRef`, `selector`) to clarify how resources are connected.
 
-- **Graph Generation**  
-  - Output graphs in [DOT format](https://graphviz.org/) for visualization with Graphviz or other tools.
+- **Multiple Output Formats**
+  - DOT, Mermaid, JSON, PNG, and SVG output formats.
+  - Mermaid renders natively in GitHub READMEs, Notion, and Confluence.
+  - PNG and SVG render directly via built-in GraphViz integration.
+  - JSON output for integration with other tools and CI pipelines.
   - Edges are automatically labeled with the reference reason, making the graph easy to interpret.
 
 - **Cobra & Viper CLI**  
@@ -42,7 +45,7 @@ Cartographer is a lightweight CLI tool written in Go that analyzes and visualize
 - **Go 1.25+** (modules enabled)
 - **Helm** (if using Helm chart ingestion)
 - **Docker** (optional, for containerized builds)
-- **Graphviz** (to visualize DOT output, installed via `brew install graphviz` on macOS or your preferred package manager)
+- **Graphviz** (optional, required for `--output-format png` and `svg`. Install via `brew install graphviz` on macOS)
 
 ### Clone the Repository
 
@@ -81,8 +84,8 @@ Cartographer offers a flexible CLI with an analyze subcommand using the Helm SDK
 - `--values`: Optional path to a Helm values file.
 - `--release`: Name for the Helm release (defaults to `cartographer-release`).
 - `--version`: The Helm Chart version you wish to use.
-- `--output-format=dot`: Generate DOT output to stdout or to a file with `--output-file`.
-- `--output-file`: Location to store the output DOT file.
+- `--output-format`: Output format — `dot` (default), `mermaid`, `json`, `png`, `svg`.
+- `--output-file`: Output file path. Required for `png` and `svg` formats.
 - `--config`: (Optional) Path to a configuration file for advanced settings.
 
 #### Version
@@ -117,30 +120,31 @@ cartographer analyze --chart bitnami/postgresql --release my-release --values va
 cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/postgresql --release my-db --version 16.4.8 --output-format dot --output-file test.dot
 ```
 
-### Run Cartographer and Visualize the DOT File
+### Output Format Examples
 
-1. Ensure you have GraphViz installed
+#### Render a PNG directly (requires GraphViz)
 ```bash
-brew install graphviz
+cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/postgresql --release my-db --version 16.4.8 --output-format png --output-file postgresql.png
 ```
 
-2. Run cartographer
+#### Generate Mermaid (renders in GitHub READMEs, Notion, Confluence)
 ```bash
-cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/postgresql --release my-db --version 16.4.8 --output-format dot --output-file bitnami-postgresql.dot
+cartographer analyze --input manifest.yaml --output-format mermaid
 ```
 
-3. Run GraphViz using the 
+#### Generate JSON (pipe to jq or integrate with other tools)
 ```bash
-dot -Tpng bitnami-postgresql.dot -o bitnami-postgresql.png
+cartographer analyze --input manifest.yaml --output-format json | jq '.edges[] | select(.reason == "secretRef")'
 ```
 
-### Example: Metallb Output
-
+#### Generate SVG
 ```bash
-cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/metallb --output-file bitnami-metallb.dot 
+cartographer analyze --chart bitnami/postgresql --version 16.4.8 --output-format svg --output-file postgresql.svg
 ```
 
+#### Generate DOT and render manually with GraphViz
 ```bash
+cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/metallb --output-format dot --output-file bitnami-metallb.dot
 dot -Tpng bitnami-metallb.dot -o bitnami-metallb.png
 ```
 
@@ -160,6 +164,16 @@ Cartographer detects dependencies across the following Kubernetes resource types
 | PodDisruptionBudget | Pod/controller targets (via selector) |
 | HorizontalPodAutoscaler | Scale target (via scaleTargetRef) |
 | Any resource | Owner references (ownerRef) |
+
+## Output Formats
+
+| Format | Flag | Output | Notes |
+|---|---|---|---|
+| DOT | `--output-format dot` | stdout or file | Default. Use with GraphViz or other DOT renderers |
+| Mermaid | `--output-format mermaid` | stdout or file | Renders natively in GitHub, Notion, Confluence |
+| JSON | `--output-format json` | stdout or file | Structured graph with `nodes` and `edges` arrays |
+| PNG | `--output-format png` | file only | Requires GraphViz installed |
+| SVG | `--output-format svg` | file only | Requires GraphViz installed |
 
 ## Known Limitations
 

@@ -2,61 +2,266 @@ package cmd_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/HMetcalfeW/cartographer/cmd"
+	"github.com/HMetcalfeW/cartographer/pkg/dependency"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// multiResourceYAML provides a realistic manifest with edges for integration tests.
+const multiResourceYAML = `
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-creds
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: nginx
+          env:
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: db-creds
+                  key: password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-svc
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+`
+
+// writeTestInput creates a temp YAML file and returns its path. The caller
+// must defer removal.
+func writeTestInput(t *testing.T, content string) string {
+	t.Helper()
+	f, err := os.CreateTemp("", "analyze-test-*.yaml")
+	require.NoError(t, err)
+	_, err = f.Write([]byte(content))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	t.Cleanup(func() { _ = os.Remove(f.Name()) })
+	return f.Name()
+}
+
+// tempOutputPath returns a path for a temp output file. The caller should
+// defer removal.
+func tempOutputPath(t *testing.T, pattern string) string {
+	t.Helper()
+	f, err := os.CreateTemp("", pattern)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	t.Cleanup(func() { _ = os.Remove(f.Name()) })
+	return f.Name()
+}
+
+func graphvizAvailable() bool {
+	_, err := exec.LookPath("dot")
+	return err == nil
+}
+
 func TestAnalyzeCommand_NoInputOrChart(t *testing.T) {
-	// Reset the root command arguments.
 	root := cmd.RootCmd
 	root.SetArgs([]string{"analyze"})
 
-	// Capture output.
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetErr(buf)
 
-	// Execute the command and expect an error.
 	err := root.Execute()
 	require.Error(t, err, "expected error when no input or chart is provided")
 	assert.Contains(t, err.Error(), "no input file or chart provided")
 }
 
 func TestAnalyzeCommand_WithInput(t *testing.T) {
-	// Create a temporary YAML file with one Kubernetes document.
-	yamlContent := `
+	inputPath := writeTestInput(t, `
 apiVersion: v1
 kind: Pod
 metadata:
   name: test-pod
-`
-	tmpfile, err := os.CreateTemp("", "analyze-test-*.yaml")
-	require.NoError(t, err, "failed to create temp file")
-	defer func() {
-		if err := os.Remove(tmpfile.Name()); err != nil {
-			t.Logf("failed to remove temp file: %v", err)
-		}
-	}()
+`)
 
-	_, err = tmpfile.Write([]byte(yamlContent))
-	require.NoError(t, err, "failed to write YAML content")
-	err = tmpfile.Close()
-	require.NoError(t, err, "failed to close temp file")
-
-	// Set the command arguments to use the temporary file.
 	root := cmd.RootCmd
-	root.SetArgs([]string{"analyze", "--input", tmpfile.Name()})
+	root.SetArgs([]string{"analyze", "--input", inputPath})
 
-	// Capture output.
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetErr(buf)
 
-	// Execute the command.
-	err = root.Execute()
+	err := root.Execute()
 	require.NoError(t, err, "expected no error when input file is provided")
+}
+
+func TestAnalyzeCommand_MermaidStdout(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "mermaid"})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "graph LR")
+	assert.Contains(t, output, "-->")
+}
+
+func TestAnalyzeCommand_MermaidFile(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+	outputPath := tempOutputPath(t, "mermaid-*.md")
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "mermaid", "--output-file", outputPath})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "graph LR")
+	assert.Contains(t, string(data), "-->")
+}
+
+func TestAnalyzeCommand_JSONStdout(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "json", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, `"nodes"`)
+	assert.Contains(t, output, `"edges"`)
+
+	// Verify it's valid JSON.
+	var graph dependency.JSONGraph
+	require.NoError(t, json.Unmarshal([]byte(output), &graph), "output must be valid JSON")
+	assert.Greater(t, len(graph.Nodes), 0, "should have nodes")
+	assert.Greater(t, len(graph.Edges), 0, "should have edges")
+}
+
+func TestAnalyzeCommand_JSONFile(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+	outputPath := tempOutputPath(t, "output-*.json")
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "json", "--output-file", outputPath})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+
+	var graph dependency.JSONGraph
+	require.NoError(t, json.Unmarshal(data, &graph), "file must contain valid JSON")
+	assert.Greater(t, len(graph.Nodes), 0)
+}
+
+func TestAnalyzeCommand_PNGFile(t *testing.T) {
+	if !graphvizAvailable() {
+		t.Skip("graphviz not installed, skipping PNG integration test")
+	}
+	inputPath := writeTestInput(t, multiResourceYAML)
+	outputPath := tempOutputPath(t, "output-*.png")
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "png", "--output-file", outputPath})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	require.True(t, len(data) > 4, "PNG file should not be empty")
+	// PNG magic bytes: 0x89 0x50 0x4E 0x47
+	assert.Equal(t, byte(0x89), data[0])
+	assert.Equal(t, byte(0x50), data[1])
+	assert.Equal(t, byte(0x4E), data[2])
+	assert.Equal(t, byte(0x47), data[3])
+}
+
+func TestAnalyzeCommand_SVGFile(t *testing.T) {
+	if !graphvizAvailable() {
+		t.Skip("graphviz not installed, skipping SVG integration test")
+	}
+	inputPath := writeTestInput(t, multiResourceYAML)
+	outputPath := tempOutputPath(t, "output-*.svg")
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "svg", "--output-file", outputPath})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "<svg")
+	assert.Contains(t, string(data), "</svg>")
+}
+
+func TestAnalyzeCommand_PNGRequiresOutputFile(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "png", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--output-file is required")
 }
