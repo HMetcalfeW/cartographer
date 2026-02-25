@@ -204,6 +204,49 @@ func handleIngressReferences(
 	}
 }
 
+// handleRoleBinding processes RoleBinding and ClusterRoleBinding objects.
+// It creates edges to the referenced Role/ClusterRole (via .roleRef) with
+// Reason="roleRef", and to each ServiceAccount subject with Reason="subject".
+func handleRoleBinding(
+	rb *unstructured.Unstructured,
+	deps map[string][]Edge,
+) {
+	rbID := ResourceID(rb)
+
+	// roleRef → Role or ClusterRole
+	roleRef, found, _ := unstructured.NestedMap(rb.Object, "roleRef")
+	if found && len(roleRef) > 0 {
+		kind, _ := roleRef["kind"].(string)
+		name, _ := roleRef["name"].(string)
+		if kind != "" && name != "" {
+			deps[rbID] = append(deps[rbID], Edge{
+				ChildID: fmt.Sprintf("%s/%s", kind, name),
+				Reason:  "roleRef",
+			})
+		}
+	}
+
+	// subjects[] → ServiceAccounts
+	subjects, foundSubjects, _ := unstructured.NestedSlice(rb.Object, "subjects")
+	if !foundSubjects {
+		return
+	}
+	for _, s := range subjects {
+		sMap, ok := s.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		kind, _ := sMap["kind"].(string)
+		name, _ := sMap["name"].(string)
+		if kind == "ServiceAccount" && name != "" {
+			deps[rbID] = append(deps[rbID], Edge{
+				ChildID: fmt.Sprintf("ServiceAccount/%s", name),
+				Reason:  "subject",
+			})
+		}
+	}
+}
+
 // handleHPAReferences checks .spec.scaleTargetRef for HPA objects, creating an
 // edge with Reason="scaleTargetRef".
 func handleHPAReferences(

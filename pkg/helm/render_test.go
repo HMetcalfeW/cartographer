@@ -127,3 +127,58 @@ func TestRenderChart_Remote(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderChart_BadValuesFile(t *testing.T) {
+	chartDir, err := os.MkdirTemp("", "testchart-badvals")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(chartDir) }()
+
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: testchart\nversion: 0.1.0\n"), 0644))
+	require.NoError(t, os.Mkdir(filepath.Join(chartDir, "templates"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "cm.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n"), 0644))
+
+	_, err = helm.RenderChart(chartDir, "/tmp/nonexistent-values-file.yaml", "test", "", "default")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read values file")
+}
+
+func TestRenderChart_NoNamespace(t *testing.T) {
+	chartDir, err := os.MkdirTemp("", "testchart-nons")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(chartDir) }()
+
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: testchart\nversion: 0.1.0\n"), 0644))
+	require.NoError(t, os.Mkdir(filepath.Join(chartDir, "templates"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "cm.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n"), 0644))
+
+	rendered, err := helm.RenderChart(chartDir, "", "test", "", "")
+	require.NoError(t, err)
+	assert.Contains(t, rendered, "ConfigMap")
+}
+
+func TestRenderChart_NotesFilteredOut(t *testing.T) {
+	chartDir, err := os.MkdirTemp("", "testchart-notes")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(chartDir) }()
+
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: testchart\nversion: 0.1.0\n"), 0644))
+	require.NoError(t, os.Mkdir(filepath.Join(chartDir, "templates"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "cm.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "NOTES.txt"), []byte("Thank you for installing!"), 0644))
+
+	rendered, err := helm.RenderChart(chartDir, "", "test", "", "default")
+	require.NoError(t, err)
+	assert.Contains(t, rendered, "ConfigMap")
+	assert.NotContains(t, rendered, "Thank you for installing")
+}
+
+func TestRenderChart_InvalidChartDir(t *testing.T) {
+	// Existing directory but not a valid chart (no Chart.yaml).
+	chartDir, err := os.MkdirTemp("", "testchart-invalid")
+	require.NoError(t, err)
+	defer func() { _ = os.RemoveAll(chartDir) }()
+
+	_, err = helm.RenderChart(chartDir, "", "test", "", "default")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to load chart")
+}

@@ -644,3 +644,155 @@ spec:
 	assert.True(t, npNotPgTargets["Deployment/redis-master"])
 	assert.True(t, npNotPgTargets["Deployment/redis-replicas"])
 }
+
+// TestBuildDependencies_RBAC tests the full ServiceAccount → RoleBinding → Role chain.
+func TestBuildDependencies_RBAC(t *testing.T) {
+	manifest := `
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: app-role
+subjects:
+  - kind: ServiceAccount
+    name: app-sa
+    namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      serviceAccountName: app-sa
+      containers:
+        - name: web
+          image: nginx
+`
+
+	objs, err := parser.ParseYAML([]byte(manifest))
+	require.NoError(t, err)
+	require.Len(t, objs, 4)
+
+	deps := dependency.BuildDependencies(objs)
+
+	// RoleBinding → Role (roleRef)
+	rbEdges := deps["RoleBinding/app-binding"]
+	edgeSet := map[string]string{}
+	for _, e := range rbEdges {
+		edgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "roleRef", edgeSet["Role/app-role"])
+	assert.Equal(t, "subject", edgeSet["ServiceAccount/app-sa"])
+
+	// Deployment → ServiceAccount
+	deployEdges := deps["Deployment/web"]
+	deployEdgeSet := map[string]string{}
+	for _, e := range deployEdges {
+		deployEdgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "serviceAccountName", deployEdgeSet["ServiceAccount/app-sa"])
+
+	// Verify DOT output includes RBAC edges
+	dot := dependency.GenerateDOT(deps)
+	assert.Contains(t, dot, `"RoleBinding/app-binding" -> "Role/app-role"`)
+	assert.Contains(t, dot, `"RoleBinding/app-binding" -> "ServiceAccount/app-sa"`)
+}
+
+// TestBuildDependencies_RBAC_HelmStyle tests RBAC with Helm-style labels and
+// ClusterRoleBinding with multiple subjects.
+func TestBuildDependencies_RBAC_HelmStyle(t *testing.T) {
+	manifest := `
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  labels:
+    app.kubernetes.io/name: prometheus
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grafana
+  labels:
+    app.kubernetes.io/name: grafana
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: monitoring-reader
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+  - kind: ServiceAccount
+    name: grafana
+    namespace: monitoring
+  - kind: Group
+    name: system:monitoring
+`
+
+	objs, err := parser.ParseYAML([]byte(manifest))
+	require.NoError(t, err)
+	require.Len(t, objs, 4)
+
+	deps := dependency.BuildDependencies(objs)
+
+	// ClusterRoleBinding → ClusterRole + 2 ServiceAccounts (Group skipped)
+	crbEdges := deps["ClusterRoleBinding/monitoring-binding"]
+	require.Len(t, crbEdges, 3)
+
+	edgeSet := map[string]string{}
+	for _, e := range crbEdges {
+		edgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "roleRef", edgeSet["ClusterRole/monitoring-reader"])
+	assert.Equal(t, "subject", edgeSet["ServiceAccount/prometheus"])
+	assert.Equal(t, "subject", edgeSet["ServiceAccount/grafana"])
+
+	// Verify JSON output includes RBAC edges
+	jsonOut := dependency.GenerateJSON(deps)
+	assert.Contains(t, jsonOut, "ClusterRoleBinding/monitoring-binding")
+	assert.Contains(t, jsonOut, "ClusterRole/monitoring-reader")
+	assert.Contains(t, jsonOut, "roleRef")
+	assert.Contains(t, jsonOut, "subject")
+}

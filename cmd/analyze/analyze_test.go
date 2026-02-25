@@ -437,6 +437,86 @@ func TestAnalyzeCommand_MatchExpressions_SVGFile(t *testing.T) {
 	assert.Contains(t, string(data), "</svg>")
 }
 
+func TestAnalyzeCommand_BadInputFile(t *testing.T) {
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", "/tmp/nonexistent-file-xyz.yaml"})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read input file")
+}
+
+func TestAnalyzeCommand_UnknownFormat(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "invalid-format"})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown output format")
+}
+
+func TestAnalyzeCommand_DOTStdout(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "dot", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "digraph G {")
+	assert.Contains(t, output, "->")
+}
+
+func TestAnalyzeCommand_DOTFile(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+	outputPath := tempOutputPath(t, "dot-*.dot")
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "dot", "--output-file", outputPath})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "digraph G {")
+}
+
+func TestAnalyzeCommand_SVGRequiresOutputFile(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "svg", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--output-file is required")
+}
+
 func TestAnalyzeCommand_PNGRequiresOutputFile(t *testing.T) {
 	inputPath := writeTestInput(t, multiResourceYAML)
 
@@ -450,4 +530,165 @@ func TestAnalyzeCommand_PNGRequiresOutputFile(t *testing.T) {
 	err := root.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--output-file is required")
+}
+
+// rbacYAML provides a manifest exercising RBAC resources for CLI integration tests.
+const rbacYAML = `
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: app-role
+subjects:
+  - kind: ServiceAccount
+    name: app-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-reader
+subjects:
+  - kind: ServiceAccount
+    name: app-sa
+`
+
+func TestAnalyzeCommand_RBAC_JSON(t *testing.T) {
+	inputPath := writeTestInput(t, rbacYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "json", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	var graph dependency.JSONGraph
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &graph))
+
+	edgeSet := map[string]string{}
+	for _, e := range graph.Edges {
+		edgeSet[e.From+"|"+e.To] = e.Reason
+	}
+
+	assert.Equal(t, "roleRef", edgeSet["RoleBinding/app-binding|Role/app-role"])
+	assert.Equal(t, "subject", edgeSet["RoleBinding/app-binding|ServiceAccount/app-sa"])
+	assert.Equal(t, "roleRef", edgeSet["ClusterRoleBinding/cluster-binding|ClusterRole/cluster-reader"])
+	assert.Equal(t, "subject", edgeSet["ClusterRoleBinding/cluster-binding|ServiceAccount/app-sa"])
+}
+
+func TestAnalyzeCommand_RBAC_DOT(t *testing.T) {
+	inputPath := writeTestInput(t, rbacYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "dot", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, `"RoleBinding/app-binding" -> "Role/app-role"`)
+	assert.Contains(t, output, `"RoleBinding/app-binding" -> "ServiceAccount/app-sa"`)
+	assert.Contains(t, output, `"ClusterRoleBinding/cluster-binding" -> "ClusterRole/cluster-reader"`)
+}
+
+func TestAnalyzeCommand_RBAC_Mermaid(t *testing.T) {
+	inputPath := writeTestInput(t, rbacYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "mermaid", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.Contains(t, output, "graph LR")
+	assert.Contains(t, output, "RoleBinding/app-binding")
+	assert.Contains(t, output, "Role/app-role")
+	assert.Contains(t, output, "ClusterRoleBinding/cluster-binding")
+}
+
+func TestAnalyzeCommand_RBAC_PNG(t *testing.T) {
+	if !graphvizAvailable() {
+		t.Skip("graphviz not installed")
+	}
+	inputPath := writeTestInput(t, rbacYAML)
+	outputPath := tempOutputPath(t, "rbac-*.png")
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "png", "--output-file", outputPath})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	require.True(t, len(data) > 4)
+	assert.Equal(t, byte(0x89), data[0]) // PNG magic
+}
+
+func TestAnalyzeCommand_RBAC_SVG(t *testing.T) {
+	if !graphvizAvailable() {
+		t.Skip("graphviz not installed")
+	}
+	inputPath := writeTestInput(t, rbacYAML)
+	outputPath := tempOutputPath(t, "rbac-*.svg")
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "svg", "--output-file", outputPath})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "<svg")
 }
