@@ -59,3 +59,34 @@ func TestGenerateJSON_DeterministicOrder(t *testing.T) {
 	second := dependency.GenerateJSON(deps)
 	assert.Equal(t, first, second, "JSON output should be deterministic")
 }
+
+// TestGenerateJSON_GroupField verifies each node has the correct group assignment.
+func TestGenerateJSON_GroupField(t *testing.T) {
+	deps := map[string][]dependency.Edge{
+		"Deployment/web": {
+			{ChildID: "Secret/db-creds", Reason: "secretRef"},
+		},
+		"Service/frontend": {
+			{ChildID: "Deployment/web", Reason: "selector"},
+		},
+		"RoleBinding/bind": {
+			{ChildID: "Role/reader", Reason: "roleRef"},
+		},
+	}
+	jsonStr := dependency.GenerateJSON(deps)
+
+	var graph dependency.JSONGraph
+	err := json.Unmarshal([]byte(jsonStr), &graph)
+	require.NoError(t, err)
+
+	groupByID := make(map[string]string)
+	for _, node := range graph.Nodes {
+		groupByID[node.ID] = node.Group
+	}
+
+	assert.Equal(t, "workloads", groupByID["Deployment/web"])
+	assert.Equal(t, "networking", groupByID["Service/frontend"])
+	assert.Equal(t, "config", groupByID["Secret/db-creds"])
+	assert.Equal(t, "rbac", groupByID["RoleBinding/bind"])
+	assert.Equal(t, "rbac", groupByID["Role/reader"])
+}

@@ -645,6 +645,108 @@ spec:
 	assert.True(t, npNotPgTargets["Deployment/redis-replicas"])
 }
 
+// TestBuildDependencies_Clustering verifies output formats include subgraph clustering.
+func TestBuildDependencies_Clustering(t *testing.T) {
+	manifest := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      serviceAccountName: app-sa
+      containers:
+        - name: web
+          image: nginx
+          env:
+            - name: DB
+              valueFrom:
+                secretKeyRef:
+                  name: db-creds
+                  key: pass
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-creds
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-sa
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-svc
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: app-role
+subjects:
+  - kind: ServiceAccount
+    name: app-sa
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web
+`
+
+	objs, err := parser.ParseYAML([]byte(manifest))
+	require.NoError(t, err)
+
+	deps := dependency.BuildDependencies(objs)
+
+	// DOT: verify color-coded nodes (no subgraph clusters)
+	dot := dependency.GenerateDOT(deps)
+	assert.Contains(t, dot, `"Deployment/web" [fillcolor=`)
+	assert.Contains(t, dot, `"Service/web-svc" [fillcolor=`)
+	assert.Contains(t, dot, `"Secret/db-creds" [fillcolor=`)
+	assert.NotContains(t, dot, "subgraph cluster_workloads")
+
+	// Mermaid: verify color-coded nodes (no subgraph clusters)
+	mermaid := dependency.GenerateMermaid(deps)
+	assert.NotContains(t, mermaid, "subgraph")
+	assert.Contains(t, mermaid, "classDef workloads fill:#DAEEF3")
+	assert.Contains(t, mermaid, "classDef networking fill:#E2EFDA")
+	assert.Contains(t, mermaid, "classDef config fill:#FFF2CC")
+	assert.Contains(t, mermaid, "classDef rbac fill:#E2D9F3")
+	assert.Contains(t, mermaid, "classDef autoscaling fill:#FCE4D6")
+
+	// JSON: verify group field
+	jsonOut := dependency.GenerateJSON(deps)
+	assert.Contains(t, jsonOut, `"group": "workloads"`)
+	assert.Contains(t, jsonOut, `"group": "networking"`)
+	assert.Contains(t, jsonOut, `"group": "config"`)
+	assert.Contains(t, jsonOut, `"group": "rbac"`)
+	assert.Contains(t, jsonOut, `"group": "autoscaling"`)
+}
+
 // TestBuildDependencies_RBAC tests the full ServiceAccount → RoleBinding → Role chain.
 func TestBuildDependencies_RBAC(t *testing.T) {
 	manifest := `

@@ -671,6 +671,157 @@ func TestAnalyzeCommand_RBAC_PNG(t *testing.T) {
 	assert.Equal(t, byte(0x89), data[0]) // PNG magic
 }
 
+// clusteringYAML exercises all 6 resource categories for subgraph clustering.
+const clusteringYAML = `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      serviceAccountName: app-sa
+      containers:
+        - name: web
+          image: nginx
+          env:
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: db-creds
+                  key: password
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-creds
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-sa
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-svc
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-role
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: app-role
+subjects:
+  - kind: ServiceAccount
+    name: app-sa
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web
+  minReplicas: 1
+  maxReplicas: 5
+`
+
+func TestAnalyzeCommand_Clustering_JSON(t *testing.T) {
+	inputPath := writeTestInput(t, clusteringYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "json", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	var graph dependency.JSONGraph
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &graph))
+
+	groupByID := make(map[string]string)
+	for _, node := range graph.Nodes {
+		groupByID[node.ID] = node.Group
+	}
+
+	assert.Equal(t, "workloads", groupByID["Deployment/web"])
+	assert.Equal(t, "config", groupByID["Secret/db-creds"])
+	assert.Equal(t, "rbac", groupByID["ServiceAccount/app-sa"])
+	assert.Equal(t, "rbac", groupByID["Role/app-role"])
+	assert.Equal(t, "rbac", groupByID["RoleBinding/app-binding"])
+	assert.Equal(t, "networking", groupByID["Service/web-svc"])
+	assert.Equal(t, "autoscaling", groupByID["HorizontalPodAutoscaler/web-hpa"])
+}
+
+func TestAnalyzeCommand_Clustering_DOT(t *testing.T) {
+	inputPath := writeTestInput(t, clusteringYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "dot", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	output := buf.String()
+	// Nodes should be color-coded, not in subgraph clusters
+	assert.Contains(t, output, `"Deployment/web" [fillcolor=`)
+	assert.Contains(t, output, `"Service/web-svc" [fillcolor=`)
+	assert.Contains(t, output, `"Secret/db-creds" [fillcolor=`)
+	assert.NotContains(t, output, "subgraph cluster_workloads")
+}
+
+func TestAnalyzeCommand_Clustering_Mermaid(t *testing.T) {
+	inputPath := writeTestInput(t, clusteringYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--output-format", "mermaid", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	output := buf.String()
+	assert.NotContains(t, output, "subgraph")
+	assert.Contains(t, output, "classDef workloads fill:#DAEEF3")
+	assert.Contains(t, output, "classDef networking fill:#E2EFDA")
+	assert.Contains(t, output, "classDef config fill:#FFF2CC")
+	assert.Contains(t, output, "classDef rbac fill:#E2D9F3")
+	assert.Contains(t, output, "classDef autoscaling fill:#FCE4D6")
+}
+
 func TestAnalyzeCommand_RBAC_SVG(t *testing.T) {
 	if !graphvizAvailable() {
 		t.Skip("graphviz not installed")

@@ -13,7 +13,8 @@ type JSONGraph struct {
 
 // JSONNode represents a single Kubernetes resource in the graph.
 type JSONNode struct {
-	ID string `json:"id"`
+	ID    string `json:"id"`
+	Group string `json:"group"`
 }
 
 // JSONEdge represents a directed dependency between two resources.
@@ -58,7 +59,7 @@ func GenerateJSON(deps map[string][]Edge) string {
 
 	nodes := make([]JSONNode, len(nodeIDs))
 	for i, id := range nodeIDs {
-		nodes[i] = JSONNode{ID: id}
+		nodes[i] = JSONNode{ID: id, Group: CategoryForNode(id)}
 	}
 
 	graph := JSONGraph{Nodes: nodes, Edges: edges}
