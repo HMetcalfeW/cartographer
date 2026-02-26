@@ -30,6 +30,12 @@ Cartographer is a lightweight CLI tool written in Go that analyzes and visualize
   - JSON output for integration with other tools and CI pipelines.
   - Edges are automatically labeled with the reference reason, making the graph easy to interpret.
 
+- **Color-Coded Resource Categories**
+  - Nodes are color-coded by semantic category: Workloads, Networking, Config & Storage, RBAC, Autoscaling & Policy.
+  - DOT/PNG/SVG output includes a legend table for easy reference.
+  - Mermaid output uses `classDef` styling for category colors.
+  - JSON output includes a `group` field on each node for programmatic filtering.
+
 - **Cobra & Viper CLI**  
   - Built with [Cobra](https://github.com/spf13/cobra) for intuitive subcommands and flags.
   - Uses [Viper](https://github.com/spf13/viper) for flexible configuration (e.g., reading from config files or environment variables).
