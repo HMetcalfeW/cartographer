@@ -558,3 +558,321 @@ func TestLabelIndexMatch(t *testing.T) {
 	matches = idx.Match(map[string]string{})
 	assert.Empty(t, matches)
 }
+
+// TestServiceMissingSpec verifies that a Service with no .spec produces no edges.
+func TestServiceMissingSpec(t *testing.T) {
+	svc := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata":   map[string]interface{}{"name": "no-spec-svc"},
+		},
+	}
+	deploy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name":   "web",
+				"labels": map[string]interface{}{"app": "web"},
+			},
+		},
+	}
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{svc, deploy})
+	assert.Empty(t, deps["Service/no-spec-svc"])
+}
+
+// TestServiceMissingSelector verifies that a Service with spec but no selector produces no edges.
+func TestServiceMissingSelector(t *testing.T) {
+	svc := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata":   map[string]interface{}{"name": "no-sel-svc"},
+			"spec": map[string]interface{}{
+				"ports": []interface{}{
+					map[string]interface{}{"port": int64(80)},
+				},
+			},
+		},
+	}
+	deploy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name":   "web",
+				"labels": map[string]interface{}{"app": "web"},
+			},
+		},
+	}
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{svc, deploy})
+	assert.Empty(t, deps["Service/no-sel-svc"])
+}
+
+// TestNetworkPolicyMissingSpec verifies NP with no .spec produces no edges.
+func TestNetworkPolicyMissingSpec(t *testing.T) {
+	np := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.k8s.io/v1",
+			"kind":       "NetworkPolicy",
+			"metadata":   map[string]interface{}{"name": "no-spec"},
+		},
+	}
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{np})
+	assert.Empty(t, deps["NetworkPolicy/no-spec"])
+}
+
+// TestPDBMissingSpec verifies PDB with no .spec produces no edges.
+func TestPDBMissingSpec(t *testing.T) {
+	pdb := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy/v1",
+			"kind":       "PodDisruptionBudget",
+			"metadata":   map[string]interface{}{"name": "no-spec"},
+		},
+	}
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{pdb})
+	assert.Empty(t, deps["PodDisruptionBudget/no-spec"])
+}
+
+// TestPDBEmptySelector verifies PDB with empty selector map produces no edges.
+func TestPDBEmptySelector(t *testing.T) {
+	pdb := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "policy/v1",
+			"kind":       "PodDisruptionBudget",
+			"metadata":   map[string]interface{}{"name": "empty-sel"},
+			"spec": map[string]interface{}{
+				"selector": map[string]interface{}{},
+			},
+		},
+	}
+	deploy := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name":   "web",
+				"labels": map[string]interface{}{"app": "web"},
+			},
+		},
+	}
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{pdb, deploy})
+	assert.Empty(t, deps["PodDisruptionBudget/empty-sel"])
+}
+
+// TestHPAMissingKindOrName verifies HPA with incomplete scaleTargetRef produces no edges.
+func TestHPAMissingKindOrName(t *testing.T) {
+	// Has kind but no name
+	hpaNoName := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "autoscaling/v2",
+			"kind":       "HorizontalPodAutoscaler",
+			"metadata":   map[string]interface{}{"name": "hpa-no-name"},
+			"spec": map[string]interface{}{
+				"scaleTargetRef": map[string]interface{}{
+					"kind": "Deployment",
+				},
+			},
+		},
+	}
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{hpaNoName})
+	assert.Empty(t, deps["HorizontalPodAutoscaler/hpa-no-name"])
+
+	// Has name but no kind
+	hpaNoKind := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "autoscaling/v2",
+			"kind":       "HorizontalPodAutoscaler",
+			"metadata":   map[string]interface{}{"name": "hpa-no-kind"},
+			"spec": map[string]interface{}{
+				"scaleTargetRef": map[string]interface{}{
+					"name": "my-deploy",
+				},
+			},
+		},
+	}
+	deps = dependency.BuildDependencies([]*unstructured.Unstructured{hpaNoKind})
+	assert.Empty(t, deps["HorizontalPodAutoscaler/hpa-no-kind"])
+}
+
+// TestIngressMissingRulesAndTLS verifies Ingress with no rules or TLS produces no edges.
+func TestIngressMissingRulesAndTLS(t *testing.T) {
+	ing := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.k8s.io/v1",
+			"kind":       "Ingress",
+			"metadata":   map[string]interface{}{"name": "empty-ing"},
+			"spec":       map[string]interface{}{},
+		},
+	}
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{ing})
+	assert.Empty(t, deps["Ingress/empty-ing"])
+}
+
+// TestIngressRuleWithoutHTTP verifies that a rule without an http block is skipped.
+func TestIngressRuleWithoutHTTP(t *testing.T) {
+	ing := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.k8s.io/v1",
+			"kind":       "Ingress",
+			"metadata":   map[string]interface{}{"name": "no-http-ing"},
+			"spec": map[string]interface{}{
+				"rules": []interface{}{
+					map[string]interface{}{
+						"host": "example.com",
+						// no http block
+					},
+				},
+			},
+		},
+	}
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{ing})
+	assert.Empty(t, deps["Ingress/no-http-ing"])
+}
+
+// TestRoleBindingToRoleAndServiceAccount verifies RoleBinding creates edges
+// to the referenced Role and ServiceAccount subjects.
+func TestRoleBindingToRoleAndServiceAccount(t *testing.T) {
+	rb := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rbac.authorization.k8s.io/v1",
+			"kind":       "RoleBinding",
+			"metadata":   map[string]interface{}{"name": "app-binding"},
+			"roleRef": map[string]interface{}{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     "Role",
+				"name":     "app-role",
+			},
+			"subjects": []interface{}{
+				map[string]interface{}{
+					"kind":      "ServiceAccount",
+					"name":      "app-sa",
+					"namespace": "default",
+				},
+			},
+		},
+	}
+
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{rb})
+	edges := deps["RoleBinding/app-binding"]
+
+	require.Len(t, edges, 2)
+	edgeSet := map[string]string{}
+	for _, e := range edges {
+		edgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "roleRef", edgeSet["Role/app-role"])
+	assert.Equal(t, "subject", edgeSet["ServiceAccount/app-sa"])
+}
+
+// TestClusterRoleBindingToClusterRoleAndMultipleSubjects verifies ClusterRoleBinding
+// with multiple ServiceAccount subjects.
+func TestClusterRoleBindingToClusterRoleAndMultipleSubjects(t *testing.T) {
+	crb := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rbac.authorization.k8s.io/v1",
+			"kind":       "ClusterRoleBinding",
+			"metadata":   map[string]interface{}{"name": "cluster-admin-binding"},
+			"roleRef": map[string]interface{}{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     "ClusterRole",
+				"name":     "cluster-admin",
+			},
+			"subjects": []interface{}{
+				map[string]interface{}{
+					"kind":      "ServiceAccount",
+					"name":      "admin-sa",
+					"namespace": "kube-system",
+				},
+				map[string]interface{}{
+					"kind":      "ServiceAccount",
+					"name":      "monitoring-sa",
+					"namespace": "monitoring",
+				},
+				map[string]interface{}{
+					"kind": "Group",
+					"name": "system:masters",
+				},
+			},
+		},
+	}
+
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{crb})
+	edges := deps["ClusterRoleBinding/cluster-admin-binding"]
+
+	// Should have roleRef + 2 ServiceAccounts (Group subject is skipped)
+	require.Len(t, edges, 3)
+	edgeSet := map[string]string{}
+	for _, e := range edges {
+		edgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "roleRef", edgeSet["ClusterRole/cluster-admin"])
+	assert.Equal(t, "subject", edgeSet["ServiceAccount/admin-sa"])
+	assert.Equal(t, "subject", edgeSet["ServiceAccount/monitoring-sa"])
+}
+
+// TestRoleBindingMissingRoleRef verifies RoleBinding with no roleRef still
+// extracts subject edges.
+func TestRoleBindingMissingRoleRef(t *testing.T) {
+	rb := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rbac.authorization.k8s.io/v1",
+			"kind":       "RoleBinding",
+			"metadata":   map[string]interface{}{"name": "no-roleref"},
+			"subjects": []interface{}{
+				map[string]interface{}{
+					"kind": "ServiceAccount",
+					"name": "some-sa",
+				},
+			},
+		},
+	}
+
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{rb})
+	edges := deps["RoleBinding/no-roleref"]
+
+	require.Len(t, edges, 1)
+	assert.Equal(t, "ServiceAccount/some-sa", edges[0].ChildID)
+	assert.Equal(t, "subject", edges[0].Reason)
+}
+
+// TestRoleBindingMissingSubjects verifies RoleBinding with no subjects
+// still extracts the roleRef edge.
+func TestRoleBindingMissingSubjects(t *testing.T) {
+	rb := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rbac.authorization.k8s.io/v1",
+			"kind":       "RoleBinding",
+			"metadata":   map[string]interface{}{"name": "no-subjects"},
+			"roleRef": map[string]interface{}{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     "Role",
+				"name":     "app-role",
+			},
+		},
+	}
+
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{rb})
+	edges := deps["RoleBinding/no-subjects"]
+
+	require.Len(t, edges, 1)
+	assert.Equal(t, "Role/app-role", edges[0].ChildID)
+	assert.Equal(t, "roleRef", edges[0].Reason)
+}
+
+// TestRoleBindingEmpty verifies RoleBinding with neither roleRef nor subjects
+// produces no edges.
+func TestRoleBindingEmpty(t *testing.T) {
+	rb := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "rbac.authorization.k8s.io/v1",
+			"kind":       "RoleBinding",
+			"metadata":   map[string]interface{}{"name": "empty-rb"},
+		},
+	}
+
+	deps := dependency.BuildDependencies([]*unstructured.Unstructured{rb})
+	assert.Empty(t, deps["RoleBinding/empty-rb"])
+}

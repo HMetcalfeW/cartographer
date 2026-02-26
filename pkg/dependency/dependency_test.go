@@ -644,3 +644,257 @@ spec:
 	assert.True(t, npNotPgTargets["Deployment/redis-master"])
 	assert.True(t, npNotPgTargets["Deployment/redis-replicas"])
 }
+
+// TestBuildDependencies_Clustering verifies output formats include subgraph clustering.
+func TestBuildDependencies_Clustering(t *testing.T) {
+	manifest := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      serviceAccountName: app-sa
+      containers:
+        - name: web
+          image: nginx
+          env:
+            - name: DB
+              valueFrom:
+                secretKeyRef:
+                  name: db-creds
+                  key: pass
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-creds
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-sa
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-svc
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: app-role
+subjects:
+  - kind: ServiceAccount
+    name: app-sa
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web
+`
+
+	objs, err := parser.ParseYAML([]byte(manifest))
+	require.NoError(t, err)
+
+	deps := dependency.BuildDependencies(objs)
+
+	// DOT: verify color-coded nodes (no subgraph clusters)
+	dot := dependency.GenerateDOT(deps)
+	assert.Contains(t, dot, `"Deployment/web" [fillcolor=`)
+	assert.Contains(t, dot, `"Service/web-svc" [fillcolor=`)
+	assert.Contains(t, dot, `"Secret/db-creds" [fillcolor=`)
+	assert.NotContains(t, dot, "subgraph cluster_workloads")
+
+	// Mermaid: verify color-coded nodes (no subgraph clusters)
+	mermaid := dependency.GenerateMermaid(deps)
+	assert.NotContains(t, mermaid, "subgraph")
+	assert.Contains(t, mermaid, "classDef workloads fill:#DAEEF3")
+	assert.Contains(t, mermaid, "classDef networking fill:#E2EFDA")
+	assert.Contains(t, mermaid, "classDef config fill:#FFF2CC")
+	assert.Contains(t, mermaid, "classDef rbac fill:#E2D9F3")
+	assert.Contains(t, mermaid, "classDef autoscaling fill:#FCE4D6")
+
+	// JSON: verify group field
+	jsonOut := dependency.GenerateJSON(deps)
+	assert.Contains(t, jsonOut, `"group": "workloads"`)
+	assert.Contains(t, jsonOut, `"group": "networking"`)
+	assert.Contains(t, jsonOut, `"group": "config"`)
+	assert.Contains(t, jsonOut, `"group": "rbac"`)
+	assert.Contains(t, jsonOut, `"group": "autoscaling"`)
+}
+
+// TestBuildDependencies_RBAC tests the full ServiceAccount → RoleBinding → Role chain.
+func TestBuildDependencies_RBAC(t *testing.T) {
+	manifest := `
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: app-role
+subjects:
+  - kind: ServiceAccount
+    name: app-sa
+    namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      serviceAccountName: app-sa
+      containers:
+        - name: web
+          image: nginx
+`
+
+	objs, err := parser.ParseYAML([]byte(manifest))
+	require.NoError(t, err)
+	require.Len(t, objs, 4)
+
+	deps := dependency.BuildDependencies(objs)
+
+	// RoleBinding → Role (roleRef)
+	rbEdges := deps["RoleBinding/app-binding"]
+	edgeSet := map[string]string{}
+	for _, e := range rbEdges {
+		edgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "roleRef", edgeSet["Role/app-role"])
+	assert.Equal(t, "subject", edgeSet["ServiceAccount/app-sa"])
+
+	// Deployment → ServiceAccount
+	deployEdges := deps["Deployment/web"]
+	deployEdgeSet := map[string]string{}
+	for _, e := range deployEdges {
+		deployEdgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "serviceAccountName", deployEdgeSet["ServiceAccount/app-sa"])
+
+	// Verify DOT output includes RBAC edges
+	dot := dependency.GenerateDOT(deps)
+	assert.Contains(t, dot, `"RoleBinding/app-binding" -> "Role/app-role"`)
+	assert.Contains(t, dot, `"RoleBinding/app-binding" -> "ServiceAccount/app-sa"`)
+}
+
+// TestBuildDependencies_RBAC_HelmStyle tests RBAC with Helm-style labels and
+// ClusterRoleBinding with multiple subjects.
+func TestBuildDependencies_RBAC_HelmStyle(t *testing.T) {
+	manifest := `
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  labels:
+    app.kubernetes.io/name: prometheus
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grafana
+  labels:
+    app.kubernetes.io/name: grafana
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: monitoring-reader
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+  - kind: ServiceAccount
+    name: grafana
+    namespace: monitoring
+  - kind: Group
+    name: system:monitoring
+`
+
+	objs, err := parser.ParseYAML([]byte(manifest))
+	require.NoError(t, err)
+	require.Len(t, objs, 4)
+
+	deps := dependency.BuildDependencies(objs)
+
+	// ClusterRoleBinding → ClusterRole + 2 ServiceAccounts (Group skipped)
+	crbEdges := deps["ClusterRoleBinding/monitoring-binding"]
+	require.Len(t, crbEdges, 3)
+
+	edgeSet := map[string]string{}
+	for _, e := range crbEdges {
+		edgeSet[e.ChildID] = e.Reason
+	}
+	assert.Equal(t, "roleRef", edgeSet["ClusterRole/monitoring-reader"])
+	assert.Equal(t, "subject", edgeSet["ServiceAccount/prometheus"])
+	assert.Equal(t, "subject", edgeSet["ServiceAccount/grafana"])
+
+	// Verify JSON output includes RBAC edges
+	jsonOut := dependency.GenerateJSON(deps)
+	assert.Contains(t, jsonOut, "ClusterRoleBinding/monitoring-binding")
+	assert.Contains(t, jsonOut, "ClusterRole/monitoring-reader")
+	assert.Contains(t, jsonOut, "roleRef")
+	assert.Contains(t, jsonOut, "subject")
+}

@@ -11,10 +11,6 @@ import (
 // identifies their interdependencies. It returns a map where each key is a
 // "parent" resource identifier ("Kind/Name"), and each value is a slice of
 // Edge structures describing the child resource and the reason for the link.
-//
-// Example:
-//
-//	"Deployment/foo" -> Edge{ChildID: "Secret/bar", Reason: "secretRef"}.
 func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 	mainLogger := log.WithFields(log.Fields{
 		"func":  "BuildDependencies",
@@ -22,109 +18,84 @@ func BuildDependencies(objs []*unstructured.Unstructured) map[string][]Edge {
 	})
 	mainLogger.Info("Starting dependency analysis")
 
-	dependencies := make(map[string][]Edge)
+	deps := make(map[string][]Edge)
 
-	// 1. Create an empty slice for every resource upfront, so loners appear in the final map.
+	// Ensure every resource appears in the map, even if it has no edges.
 	for _, obj := range objs {
-		parentKey := ResourceID(obj)
-		dependencies[parentKey] = []Edge{} // ensures each resource is present
+		deps[ResourceID(obj)] = []Edge{}
 	}
 
-	// 2. Process ownerReferences (Owner -> Child).
+	// Process ownerReferences (Owner -> Child).
 	for _, obj := range objs {
 		childID := ResourceID(obj)
 		for _, owner := range obj.GetOwnerReferences() {
 			ownerID := fmt.Sprintf("%s/%s", owner.Kind, owner.Name)
-			edge := Edge{ChildID: childID, Reason: "ownerRef"}
-			dependencies[ownerID] = append(dependencies[ownerID], edge)
-
-			log.WithFields(log.Fields{
-				"func":    "BuildDependencies",
-				"ownerID": ownerID,
-				"childID": childID,
-			}).Debug("Added owner->child dependency")
+			deps[ownerID] = append(deps[ownerID], Edge{ChildID: childID, Reason: "ownerRef"})
 		}
 	}
 
-	// 3. Build a label index for O(n) selector lookups, then process selectors.
+	// Build a label index for O(n) selector lookups, then process all
+	// resource-specific handlers in a single pass.
 	labelIdx := BuildLabelIndex(objs)
 	for _, obj := range objs {
 		switch obj.GetKind() {
 		case "Service":
-			handleServiceLabelSelector(obj, labelIdx, dependencies)
+			handleServiceLabelSelector(obj, labelIdx, deps)
 		case "NetworkPolicy":
-			handleNetworkPolicy(obj, labelIdx, dependencies)
+			handleNetworkPolicy(obj, labelIdx, deps)
 		case "PodDisruptionBudget":
-			handlePodDisruptionBudget(obj, labelIdx, dependencies)
+			handlePodDisruptionBudget(obj, labelIdx, deps)
+		case "Ingress":
+			handleIngressReferences(obj, deps)
+		case "HorizontalPodAutoscaler":
+			handleHPAReferences(obj, deps)
+		case "RoleBinding", "ClusterRoleBinding":
+			handleRoleBinding(obj, deps)
 		}
-	}
 
-	// 4. Ingress references (Ingress -> Services, Ingress -> Secrets for TLS)
-	for _, obj := range objs {
-		if obj.GetKind() == "Ingress" {
-			handleIngressReferences(obj, dependencies)
-		}
-	}
-
-	// 5. HorizontalPodAutoscaler references (HPA -> scaleTargetRef)
-	for _, obj := range objs {
-		if obj.GetKind() == "HorizontalPodAutoscaler" {
-			handleHPAReferences(obj, dependencies)
-		}
-	}
-
-	// 6. Pod spec references in Pods, Deployments, DaemonSets, etc.
-	for _, obj := range objs {
+		// Pod spec references (Secrets, ConfigMaps, PVCs, ServiceAccounts).
 		if IsPodOrController(obj) {
-			podSpec, found, err := GetPodSpec(obj)
-			if err != nil {
-				log.WithFields(log.Fields{
-					"func":  "BuildDependencies",
-					"error": err,
-					"kind":  obj.GetKind(),
-					"name":  obj.GetName(),
-				}).Warn("Error retrieving podSpec")
-				continue
-			}
-			if !found || podSpec == nil {
-				continue
-			}
-
-			parentID := ResourceID(obj)
-			secrets, configMaps, pvcs, serviceAccounts := GatherPodSpecReferences(podSpec)
-
-			for _, child := range secrets {
-				dependencies[parentID] = append(dependencies[parentID], Edge{
-					ChildID: child,
-					Reason:  "secretRef",
-				})
-			}
-			for _, child := range configMaps {
-				dependencies[parentID] = append(dependencies[parentID], Edge{
-					ChildID: child,
-					Reason:  "configMapRef",
-				})
-			}
-			for _, child := range pvcs {
-				dependencies[parentID] = append(dependencies[parentID], Edge{
-					ChildID: child,
-					Reason:  "pvcRef",
-				})
-			}
-			for _, child := range serviceAccounts {
-				dependencies[parentID] = append(dependencies[parentID], Edge{
-					ChildID: child,
-					Reason:  "serviceAccountName",
-				})
-			}
+			gatherPodSpecEdges(obj, deps)
 		}
 	}
 
 	// Deduplicate edges for each parent.
-	for parent, edges := range dependencies {
-		dependencies[parent] = deduplicateEdges(edges)
+	for parent, edges := range deps {
+		deps[parent] = deduplicateEdges(edges)
 	}
 
-	mainLogger.WithField("dependencies_count", len(dependencies)).Info("Finished building dependencies")
-	return dependencies
+	mainLogger.WithField("dependencies_count", len(deps)).Info("Finished building dependencies")
+	return deps
+}
+
+// gatherPodSpecEdges extracts pod spec references from a pod or controller
+// and appends them as edges to the dependency map.
+func gatherPodSpecEdges(obj *unstructured.Unstructured, deps map[string][]Edge) {
+	podSpec, found, err := GetPodSpec(obj)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"func": "gatherPodSpecEdges",
+			"kind": obj.GetKind(),
+			"name": obj.GetName(),
+		}).WithError(err).Warn("Error retrieving podSpec")
+		return
+	}
+	if !found || podSpec == nil {
+		return
+	}
+
+	parentID := ResourceID(obj)
+	secrets, configMaps, pvcs, serviceAccounts := GatherPodSpecReferences(podSpec)
+
+	appendEdges(deps, parentID, secrets, "secretRef")
+	appendEdges(deps, parentID, configMaps, "configMapRef")
+	appendEdges(deps, parentID, pvcs, "pvcRef")
+	appendEdges(deps, parentID, serviceAccounts, "serviceAccountName")
+}
+
+// appendEdges adds an edge from parentID to each child with the given reason.
+func appendEdges(deps map[string][]Edge, parentID string, children []string, reason string) {
+	for _, child := range children {
+		deps[parentID] = append(deps[parentID], Edge{ChildID: child, Reason: reason})
+	}
 }

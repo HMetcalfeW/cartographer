@@ -163,6 +163,7 @@ Cartographer detects dependencies across the following Kubernetes resource types
 | NetworkPolicy | Pod/controller targets (via podSelector with matchLabels + matchExpressions) |
 | PodDisruptionBudget | Pod/controller targets (via selector with matchLabels + matchExpressions) |
 | HorizontalPodAutoscaler | Scale target (via scaleTargetRef) |
+| RoleBinding, ClusterRoleBinding | Role/ClusterRole (via roleRef), ServiceAccounts (via subjects) |
 | Any resource | Owner references (ownerRef) |
 
 ## Output Formats
