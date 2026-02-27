@@ -54,6 +54,16 @@ Extend label selector matching beyond `matchLabels` to support `matchExpressions
 - [x] **README.md updated** — RoleBinding/ClusterRoleBinding added to Supported Resource Types
 - [x] **ROADMAP.md updated** — v0.5.0 marked complete
 
+### Phase 4: Color-Coded Resource Categories ✅
+
+- [x] **Add `categories.go`** — 6 semantic categories (Workloads, Networking, Config & Storage, RBAC, Autoscaling & Policy, Other) with pastel fill colors
+- [x] **Color-coded DOT output** — per-node `fillcolor` with HTML-table legend at `rank=sink`, no subgraph clusters (allows GraphViz to optimize east→west flow)
+- [x] **Color-coded Mermaid output** — `classDef`/`class` directives for node fill colors, no subgraph clusters
+- [x] **JSON `group` field** — each node includes its category key for programmatic access
+- [x] **Orphan filtering** — nodes with no edges excluded from all output formats
+- [x] **Deterministic output** — nodes and edges sorted across all formats
+- [x] **Tests** — unit tests for categories, color-coded DOT/Mermaid/JSON, orphan filtering, deterministic ordering, CLI integration tests
+
 ---
 
 ## v0.6.0 — Cross-Namespace Resolution
