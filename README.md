@@ -2,7 +2,7 @@
 
 # Cartographer
 
-Cartographer is a lightweight CLI tool written in Go that analyzes and visualizes relationships between Kubernetes resources. It ingests Kubernetes manifests—either from YAML files or via the Helm SDK—and produces dependency graphs in multiple formats (DOT, Mermaid, JSON, PNG, SVG) to help you understand and document your application's architecture.
+Cartographer is a lightweight CLI tool written in Go that analyzes and visualizes relationships between Kubernetes resources. It ingests Kubernetes manifests—from YAML files, Helm charts, or a live cluster—and produces dependency graphs in multiple formats (DOT, Mermaid, JSON, PNG, SVG) to help you understand and document your application's architecture.
 
 ## Features
 
@@ -10,9 +10,14 @@ Cartographer is a lightweight CLI tool written in Go that analyzes and visualize
   - Parse multi-document YAML files and convert them into structured Kubernetes objects for analysis.
   - Support for ephemeral containers, environment variable references, volume references (Secrets, ConfigMaps, PVCs), and more.
 
-- **Helm Chart Support**  
+- **Helm Chart Support**
   - Render and analyze Kubernetes manifests from Helm charts via the Helm SDK.
   - Specify the chart path similarly to Helm CLI usage (e.g., `--chart`, `--release`, `--values`, `--version`).
+
+- **Live Cluster Mode**
+  - Connect to a running Kubernetes cluster via kubeconfig and analyze deployed resources directly from the API server.
+  - `--cluster` flag with optional `-A` / `--all-namespaces` for cross-namespace analysis.
+  - Cluster settings (`kubeconfig`, `context`) configurable via `.cartographer.yaml`.
 
 - **Dependency Analysis with Labeled Edges**  
   - Detect references such as:
@@ -36,7 +41,12 @@ Cartographer is a lightweight CLI tool written in Go that analyzes and visualize
   - Mermaid output uses `classDef` styling for category colors.
   - JSON output includes a `group` field on each node for programmatic filtering.
 
-- **Cobra & Viper CLI**  
+- **Config-Driven Filtering**
+  - Exclude resources by kind or name via `.cartographer.yaml` — no extra CLI flags needed.
+  - Applies to all input modes (YAML, Helm, cluster).
+  - Case-insensitive kind matching (e.g., `configmap` matches `ConfigMap`).
+
+- **Cobra & Viper CLI**
   - Built with [Cobra](https://github.com/spf13/cobra) for intuitive subcommands and flags.
   - Uses [Viper](https://github.com/spf13/viper) for flexible configuration (e.g., reading from config files or environment variables).
 
@@ -87,12 +97,17 @@ Cartographer offers a flexible CLI with an analyze subcommand using the Helm SDK
 
 - `--input`: Path to a Kubernetes YAML file.
 - `--chart`: Local path or remote chart name (bitnami/postgresql).
+- `--cluster`: Analyze resources from a live Kubernetes cluster.
+- `-A, --all-namespaces`: Fetch resources from all namespaces (requires `--cluster`).
 - `--values`: Optional path to a Helm values file.
 - `--release`: Name for the Helm release (defaults to `cartographer-release`).
 - `--version`: The Helm Chart version you wish to use.
+- `--namespace`: Namespace scope for Helm rendering or cluster queries.
 - `--output-format`: Output format — `dot` (default), `mermaid`, `json`, `png`, `svg`.
 - `--output-file`: Output file path. Required for `png` and `svg` formats.
 - `--config`: (Optional) Path to a configuration file for advanced settings.
+
+> **Note:** `--input`, `--chart`, and `--cluster` are mutually exclusive — specify exactly one.
 
 #### Version
 ```bash
@@ -124,6 +139,18 @@ cartographer analyze --chart bitnami/postgresql --release my-release --values va
 
 ```bash
 cartographer analyze --chart oci://registry-1.docker.io/bitnamicharts/postgresql --release my-db --version 16.4.8 --output-format dot --output-file test.dot
+```
+
+#### 5. Analyze a Live Kubernetes Cluster
+
+```bash
+cartographer analyze --cluster --namespace default --output-format json
+```
+
+#### 6. Analyze All Namespaces in a Live Cluster
+
+```bash
+cartographer analyze --cluster -A --output-format dot --output-file cluster.dot
 ```
 
 ### Output Format Examples
@@ -186,17 +213,39 @@ Cartographer detects dependencies across the following Kubernetes resource types
 
 - **No CRD support** — Custom Resource Definitions are parsed but their internal references are not analyzed.
 - **No cross-namespace resolution** — All resources are assumed to be in the same namespace.
-- **No Kustomize support** — Only raw YAML files and Helm charts are supported as input.
+- **No Kustomize support** — Only raw YAML files, Helm charts, and live clusters are supported as input.
 
 ## Configuration
-The default location of cartographer's configuration file if the `--config` flag is undefined is `$HOME/.cartographer.yaml`
+The default location of cartographer's configuration file if the `--config` flag is undefined is `$HOME/.cartographer.yaml`. A reference config ships with the repo at `.cartographer.yaml`.
 
-Right now the configuration supports changing the log level of the application. For example:
+### Default Exclusions
+
+Cartographer excludes `ReplicaSet` and `Pod` by default. These are auto-managed by controllers (Deployments create ReplicaSets, which create Pods) and add noise to the graph. To see everything, override with an empty list in your config:
+
+```yaml
+exclude:
+  kinds: []
+```
+
+### Full Config Reference
 
 ```yaml
 log:
-  level: "debug"
+  level: "info"             # Log level: debug, info, warn, error
+
+cluster:
+  kubeconfig: ""            # Path to kubeconfig (default: $KUBECONFIG or ~/.kube/config)
+  context: ""               # Kube context (default: current-context)
+
+exclude:
+  kinds:                    # Resource kinds to exclude from ALL input modes
+    - ReplicaSet            # (default) auto-managed by Deployments
+    - Pod                   # (default) auto-managed by ReplicaSets, Jobs, etc.
+  names:                    # Resource names to exclude from ALL input modes
+    - kube-root-ca.crt      # (example) auto-created system ConfigMap
 ```
+
+The `exclude` stanzas apply universally to YAML, Helm, and live cluster inputs. Kind matching is case-insensitive (`configmap` matches `ConfigMap`).
 
 ## Repo Maintenance
 

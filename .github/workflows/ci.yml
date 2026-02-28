@@ -46,3 +46,23 @@ jobs:
 
       - name: Clean
         run: make clean
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: cartographer-integration
+
+      - name: Run integration tests
+        run: make integration-test
