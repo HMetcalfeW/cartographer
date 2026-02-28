@@ -8,8 +8,14 @@ BUILD_DIR=build
 VERSION_PKG=github.com/HMetcalfeW/cartographer/cmd/version
 LDFLAGS=-ldflags="-s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).Date=$(DATE)"
 
+# Integration test settings
+INTEGRATION_CLUSTER=cartographer-integration
+INTEGRATION_NS=cartographer-test
+INTEGRATION_BINARY=$(BUILD_DIR)/integration-test/$(BINARY_NAME)
+
 # Targets
-.PHONY: all deps update-deps clean lint test coverhtml build docker
+.PHONY: all deps update-deps clean lint test coverhtml build docker \
+	integration-cluster-up integration-cluster-down integration-test
 
 all: deps lint test build
 
@@ -55,6 +61,36 @@ build:
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BUILD_DIR)/linux/$(BINARY_NAME) .
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(BUILD_DIR)/darwin_arm64/$(BINARY_NAME) .
 	@echo "Build complete."
+
+# Integration test: spins up a kind cluster, deploys fixtures, validates --cluster mode.
+# Requires: kind, kubectl
+#   make integration-cluster-up    — build binary, create cluster, deploy fixtures
+#   make integration-cluster-down  — delete cluster, clean build artifacts
+#   make integration-test          — all-in-one: up → test → down
+integration-cluster-up:
+	@echo "Setting up integration environment..."
+	@mkdir -p $(dir $(INTEGRATION_BINARY))
+	@go build -o $(INTEGRATION_BINARY) .
+	@echo "  Binary: $(INTEGRATION_BINARY)"
+	@if kind get clusters 2>/dev/null | grep -q '^$(INTEGRATION_CLUSTER)$$'; then \
+		echo "  Cluster '$(INTEGRATION_CLUSTER)' already exists, reusing."; \
+	else \
+		echo "  Creating kind cluster '$(INTEGRATION_CLUSTER)'..."; \
+		kind create cluster --name $(INTEGRATION_CLUSTER) --wait 60s; \
+	fi
+	@kubectl create namespace $(INTEGRATION_NS) --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl apply -f tests/integration/fixtures.yaml
+	@kubectl -n $(INTEGRATION_NS) rollout status deployment/web --timeout=60s
+	@echo "Integration environment ready."
+
+integration-cluster-down:
+	@echo "Tearing down integration environment..."
+	@kind delete cluster --name $(INTEGRATION_CLUSTER) 2>/dev/null || true
+	@rm -rf $(BUILD_DIR)/integration-test
+	@echo "Integration environment destroyed."
+
+integration-test: integration-cluster-up
+	@./tests/integration/cluster_test.sh; rc=$$?; $(MAKE) integration-cluster-down; exit $$rc
 
 # Build Docker image for the host platform
 docker:

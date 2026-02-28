@@ -33,7 +33,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	// Global flag for config file.
-	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.cartographer.yaml)")
+	RootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ./.cartographer.yaml or $HOME/.cartographer.yaml)")
 
 	// Configure logrus to use a text formatter with full timestamps.
 	log.SetFormatter(&log.TextFormatter{
@@ -56,10 +56,17 @@ func initConfig() {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
-		viper.AddConfigPath("$HOME")
+		viper.AddConfigPath(".")     // project-local config takes priority
+		viper.AddConfigPath("$HOME") // then fall back to global config
 		viper.SetConfigName(".cartographer")
 	}
 	viper.AutomaticEnv() // read in environment variables that match
+
+	// Defaults for cluster and exclusion config.
+	viper.SetDefault("cluster.kubeconfig", "")
+	viper.SetDefault("cluster.context", "")
+	viper.SetDefault("exclude.kinds", []string{"ReplicaSet", "Pod"})
+	viper.SetDefault("exclude.names", []string{})
 
 	if err := viper.ReadInConfig(); err == nil {
 		logger.Info("Using config file:", viper.ConfigFileUsed())

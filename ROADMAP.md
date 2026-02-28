@@ -66,14 +66,36 @@ Extend label selector matching beyond `matchLabels` to support `matchExpressions
 
 ---
 
-## v0.6.0 — Cross-Namespace Resolution
+## v0.6.0 — Live Cluster Mode & Config-Driven Filtering
+
+### Live Cluster Mode
+- [x] **`pkg/cluster` package** — `NewClient()` builds a `dynamic.Interface` from kubeconfig, `FetchResources()` lists 20 supported GVRs
+- [x] **`--cluster` flag** — analyze resources from a live Kubernetes cluster (mutually exclusive with `--input`/`--chart`)
+- [x] **`-A, --all-namespaces` flag** — fetch resources across all namespaces (requires `--cluster`)
+- [x] **Cluster-scoped resources** — ClusterRole and ClusterRoleBinding always listed at cluster scope
+- [x] **Graceful error handling** — 404 (missing GVR) and 403 (forbidden) logged and skipped
+
+### Config-Driven Filtering
+- [x] **`pkg/filter` package** — `Apply()` excludes resources by kind (case-insensitive) or name (exact match)
+- [x] **Config file schema** — `exclude.kinds` and `exclude.names` stanzas in `.cartographer.yaml`
+- [x] **Universal filtering** — applies to all input modes (YAML, Helm, cluster)
+- [x] **Cluster config** — `cluster.kubeconfig` and `cluster.context` stanzas for kubeconfig/context override
+
+### Tests
+- [x] **`pkg/filter` tests** — 8 table-driven tests covering empty exclusions, kind/name filtering, case sensitivity, edge cases
+- [x] **`pkg/cluster` tests** — 5 tests using fake dynamic client (basic fetch, all-namespaces, namespace-scoped, empty cluster, full pipeline)
+- [x] **CLI integration tests** — mutual exclusivity validation, `-A` without `--cluster`, kind/name filter integration
+
+---
+
+## v0.7.0 — Cross-Namespace Resolution
 
 ### Cross-Namespace Resolution
 Track resource namespaces and resolve references across namespace boundaries. Enables accurate graphing of Ingress routes, NetworkPolicy peers, and other cross-namespace relationships. This is a correctness improvement — the current single-namespace assumption silently produces incomplete graphs for multi-namespace manifests.
 
 ---
 
-## v0.7.0 — Kustomize Support
+## v0.8.0 — Kustomize Support
 
 ### Kustomize Support
 Accept `kustomization.yaml` as input, render overlays, and analyze the resulting manifests. Completes the "three input sources" story: raw YAML, Helm, and Kustomize — covering every mainstream Kubernetes manifest workflow.
@@ -91,9 +113,6 @@ Final pass on error messages, `--verbose`/`--quiet` flags, documentation polish,
 ---
 
 ## Post-1.0
-
-### Live Cluster Mode
-Connect to a running Kubernetes cluster via kubeconfig and analyze deployed resources directly from the API server. Reuses the existing dependency analysis engine with a new resource source.
 
 ### Interactive Web Viewer
 Generate a self-contained HTML file with an interactive graph (D3.js or Cytoscape.js) supporting pan, zoom, filtering, and node inspection. Eliminates the GraphViz dependency entirely for visual exploration.

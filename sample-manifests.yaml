@@ -1,0 +1,158 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: webapp-sa
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+type: Opaque
+data:
+  password: cGFzc3dvcmQ=
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tls-cert
+type: kubernetes.io/tls
+data:
+  tls.crt: LS0t
+  tls.key: LS0t
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: registry-creds
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: e30=
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  APP_ENV: production
+  LOG_LEVEL: info
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-pvc
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  labels:
+    app: webapp
+    tier: frontend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+        tier: frontend
+    spec:
+      serviceAccountName: webapp-sa
+      imagePullSecrets:
+        - name: registry-creds
+      containers:
+        - name: web
+          image: myapp:latest
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
+          envFrom:
+            - configMapRef:
+                name: app-config
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-svc
+spec:
+  selector:
+    app: webapp
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: webapp-ingress
+spec:
+  tls:
+    - secretName: tls-cert
+      hosts:
+        - webapp.example.com
+  rules:
+    - host: webapp.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: webapp-svc
+                port:
+                  number: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: webapp-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: webapp
+  minReplicas: 2
+  maxReplicas: 10
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: webapp-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: webapp
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: webapp-netpol
+spec:
+  podSelector:
+    matchLabels:
+      app: webapp
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              role: frontend
+      ports:
+        - port: 8080

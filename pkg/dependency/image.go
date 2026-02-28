@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // RenderImage generates DOT from the dependency map and pipes it through
@@ -25,6 +27,13 @@ func RenderImage(deps map[string][]Edge, format string) ([]byte, error) {
 		)
 	}
 
+	logger := log.WithFields(log.Fields{
+		"func":    "RenderImage",
+		"format":  format,
+		"dotPath": dotPath,
+	})
+	logger.Debug("Invoking GraphViz")
+
 	dotContent := GenerateDOT(deps)
 
 	cmd := exec.Command(dotPath, "-T"+format)
@@ -38,5 +47,6 @@ func RenderImage(deps map[string][]Edge, format string) ([]byte, error) {
 		return nil, fmt.Errorf("graphviz rendering failed: %w\nstderr: %s", err, stderr.String())
 	}
 
+	logger.WithField("bytes", stdout.Len()).Debug("GraphViz render complete")
 	return stdout.Bytes(), nil
 }

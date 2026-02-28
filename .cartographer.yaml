@@ -1,0 +1,15 @@
+# Cartographer default configuration.
+# Place this file at $HOME/.cartographer.yaml or pass --config <path>.
+
+log:
+  level: "info"   # debug, info, warn, error
+
+cluster:
+  kubeconfig: ""   # path to kubeconfig (default: $KUBECONFIG or ~/.kube/config)
+  context: ""      # kube context (default: current-context)
+
+exclude:
+  kinds:
+    - ReplicaSet   # auto-managed by Deployments
+    - Pod          # auto-managed by ReplicaSets, Jobs, etc.
+  names: []

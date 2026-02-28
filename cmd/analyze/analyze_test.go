@@ -9,6 +9,7 @@ import (
 
 	"github.com/HMetcalfeW/cartographer/cmd"
 	"github.com/HMetcalfeW/cartographer/pkg/dependency"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -94,8 +95,8 @@ func TestAnalyzeCommand_NoInputOrChart(t *testing.T) {
 	root.SetErr(buf)
 
 	err := root.Execute()
-	require.Error(t, err, "expected error when no input or chart is provided")
-	assert.Contains(t, err.Error(), "no input file or chart provided")
+	require.Error(t, err, "expected error when no input source is provided")
+	assert.Contains(t, err.Error(), "no input source provided")
 }
 
 func TestAnalyzeCommand_WithInput(t *testing.T) {
@@ -842,4 +843,82 @@ func TestAnalyzeCommand_RBAC_SVG(t *testing.T) {
 	data, err := os.ReadFile(outputPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "<svg")
+}
+
+func TestAnalyzeCommand_MutualExclusivity(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--cluster"})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+func TestAnalyzeCommand_AllNamespacesWithoutCluster(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--cluster=false", "-A"})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--all-namespaces can only be used with --cluster")
+}
+
+func TestAnalyzeCommand_FilterExcludesKinds(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+
+	viper.Set("exclude.kinds", []string{"Service"})
+	t.Cleanup(func() { viper.Set("exclude.kinds", []string{}) })
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--cluster=false", "--all-namespaces=false", "--output-format", "json", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	var graph dependency.JSONGraph
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &graph))
+
+	for _, node := range graph.Nodes {
+		assert.NotEqual(t, "Service/web-svc", node.ID, "Service should be excluded by kind filter")
+	}
+}
+
+func TestAnalyzeCommand_FilterExcludesNames(t *testing.T) {
+	inputPath := writeTestInput(t, multiResourceYAML)
+
+	viper.Set("exclude.names", []string{"web-svc"})
+	t.Cleanup(func() { viper.Set("exclude.names", []string{}) })
+
+	root := cmd.RootCmd
+	root.SetArgs([]string{"analyze", "--input", inputPath, "--cluster=false", "--all-namespaces=false", "--output-format", "json", "--output-file", ""})
+
+	buf := new(bytes.Buffer)
+	root.SetOut(buf)
+	root.SetErr(buf)
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	var graph dependency.JSONGraph
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &graph))
+
+	for _, node := range graph.Nodes {
+		assert.NotEqual(t, "Service/web-svc", node.ID, "web-svc should be excluded by name filter")
+	}
 }

@@ -3,6 +3,8 @@ package dependency
 import (
 	"encoding/json"
 	"sort"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // JSONGraph is the top-level structure emitted by GenerateJSON.
@@ -64,5 +66,12 @@ func GenerateJSON(deps map[string][]Edge) string {
 
 	graph := JSONGraph{Nodes: nodes, Edges: edges}
 	data, _ := json.MarshalIndent(graph, "", "  ")
+
+	log.WithFields(log.Fields{
+		"func":  "GenerateJSON",
+		"nodes": len(nodes),
+		"edges": len(edges),
+	}).Debug("Generated JSON graph")
+
 	return string(data)
 }

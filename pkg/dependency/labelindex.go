@@ -1,6 +1,7 @@
 package dependency
 
 import (
+	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -13,15 +14,24 @@ type LabelIndex map[string][]*unstructured.Unstructured
 // Pods and controller types (Deployment, DaemonSet, etc.).
 func BuildLabelIndex(objs []*unstructured.Unstructured) LabelIndex {
 	idx := make(LabelIndex)
+	indexed := 0
 	for _, obj := range objs {
 		if !IsPodOrController(obj) {
 			continue
 		}
+		indexed++
 		for k, v := range obj.GetLabels() {
 			key := k + "=" + v
 			idx[key] = append(idx[key], obj)
 		}
 	}
+
+	log.WithFields(log.Fields{
+		"func":            "BuildLabelIndex",
+		"indexed_objects": indexed,
+		"label_keys":      len(idx),
+	}).Debug("Built label index")
+
 	return idx
 }
 
