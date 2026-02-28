@@ -20,7 +20,7 @@ bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 
 assert_contains() {
     local label="$1" haystack="$2" needle="$3"
-    if echo "$haystack" | grep -qF -- "$needle"; then
+    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
         green "  PASS: $label"
         PASS=$((PASS + 1))
     else
@@ -31,12 +31,23 @@ assert_contains() {
 
 assert_not_contains() {
     local label="$1" haystack="$2" needle="$3"
-    if echo "$haystack" | grep -qF -- "$needle"; then
+    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
         red "  FAIL: $label — did NOT expect to find '$needle'"
         FAIL=$((FAIL + 1))
     else
         green "  PASS: $label"
         PASS=$((PASS + 1))
+    fi
+}
+
+assert_file_contains() {
+    local label="$1" file="$2" needle="$3"
+    if grep -qF -- "$needle" "$file"; then
+        green "  PASS: $label"
+        PASS=$((PASS + 1))
+    else
+        red "  FAIL: $label — expected to find '$needle'"
+        FAIL=$((FAIL + 1))
     fi
 }
 
@@ -118,12 +129,17 @@ echo ""
 
 bold "4. Test: --cluster -A --output-format json"
 
-ALL_NS_OUT=$("$BINARY" analyze --cluster -A --output-format json 2>/dev/null)
+# Write to a temp file — all-namespaces output can be hundreds of KB
+# (every system ClusterRole/Binding), which exceeds shell variable limits
+# on some CI runners.
+ALL_NS_FILE=$(mktemp /tmp/cartographer-allns-XXXXXX.json)
+"$BINARY" analyze --cluster -A --output-format json > "$ALL_NS_FILE" 2>/dev/null
 
-assert_contains "All-ns has nodes"      "$ALL_NS_OUT" '"nodes"'
-assert_contains "All-ns has our deploy" "$ALL_NS_OUT" '"Deployment/web"'
-assert_contains "All-ns has ClusterRoles"        "$ALL_NS_OUT" '"ClusterRole/'
-assert_contains "All-ns has ClusterRoleBindings" "$ALL_NS_OUT" '"ClusterRoleBinding/'
+assert_file_contains "All-ns has nodes"      "$ALL_NS_FILE" '"nodes"'
+assert_file_contains "All-ns has our deploy" "$ALL_NS_FILE" '"Deployment/web"'
+assert_file_contains "All-ns has ClusterRoles"        "$ALL_NS_FILE" '"ClusterRole/'
+assert_file_contains "All-ns has ClusterRoleBindings" "$ALL_NS_FILE" '"ClusterRoleBinding/'
+rm -f "$ALL_NS_FILE"
 
 echo ""
 
@@ -170,7 +186,7 @@ echo ""
 bold "7. Test: --cluster + --input mutual exclusivity"
 
 MUTEX_OUT=$("$BINARY" analyze --cluster --input /dev/null 2>&1 || true)
-if echo "$MUTEX_OUT" | grep -qF "mutually exclusive"; then
+if printf '%s' "$MUTEX_OUT" | grep -qF "mutually exclusive"; then
     green "  PASS: mutually exclusive error"
     PASS=$((PASS + 1))
 else
