@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // GenerateDOT produces a DOT graph with resources color-coded by category
@@ -48,11 +50,19 @@ func GenerateDOT(deps map[string][]Edge) string {
 	}
 	sort.Strings(parents)
 
+	edgeCount := 0
 	for _, parent := range parents {
 		for _, edge := range deps[parent] {
 			sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\"];\n", parent, edge.ChildID, edge.Reason))
+			edgeCount++
 		}
 	}
+
+	log.WithFields(log.Fields{
+		"func":  "GenerateDOT",
+		"nodes": len(connected),
+		"edges": edgeCount,
+	}).Debug("Generated DOT graph")
 
 	// Determine which categories are present.
 	activeCats := make(map[string]bool)

@@ -62,6 +62,20 @@ var AnalyzeCmd = &cobra.Command{
 			namespace = DefaultNamespace
 		}
 
+		// Determine input source label for logging.
+		source := "file"
+		if chartPath != "" {
+			source = "chart"
+		} else if clusterMode {
+			source = "cluster"
+		}
+		logger := log.WithFields(log.Fields{
+			"func":      "analyze",
+			"source":    source,
+			"namespace": namespace,
+		})
+		logger.Info("Starting analysis")
+
 		var objs []*unstructured.Unstructured
 
 		switch {
@@ -91,10 +105,21 @@ var AnalyzeCmd = &cobra.Command{
 			}
 		}
 
+		logger.WithField("count", len(objs)).Info("Loaded resources")
+
 		// Apply config-driven exclusion filters.
+		beforeFilter := len(objs)
 		objs = filter.Apply(objs, viper.GetStringSlice("exclude.kinds"), viper.GetStringSlice("exclude.names"))
+		if excluded := beforeFilter - len(objs); excluded > 0 {
+			logger.WithFields(log.Fields{
+				"before":   beforeFilter,
+				"after":    len(objs),
+				"excluded": excluded,
+			}).Info("Applied exclusion filters")
+		}
 
 		deps := dependency.BuildDependencies(objs)
+		logger.WithField("nodes", len(deps)).Info("Built dependency graph")
 
 		return writeOutput(cmd, deps, outputFormat, outputFile)
 	},
@@ -103,6 +128,10 @@ var AnalyzeCmd = &cobra.Command{
 // loadManifests reads YAML from a file or renders a Helm chart.
 func loadManifests(inputPath, chartPath, valuesFile, releaseName, version, namespace string) ([]byte, error) {
 	if inputPath != "" {
+		log.WithFields(log.Fields{
+			"func": "loadManifests",
+			"path": inputPath,
+		}).Debug("Reading YAML file")
 		data, err := os.ReadFile(inputPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read input file: %w", err)
@@ -110,6 +139,10 @@ func loadManifests(inputPath, chartPath, valuesFile, releaseName, version, names
 		return data, nil
 	}
 
+	log.WithFields(log.Fields{
+		"func":  "loadManifests",
+		"chart": chartPath,
+	}).Debug("Rendering Helm chart")
 	rendered, err := helm.RenderChart(chartPath, valuesFile, releaseName, version, namespace)
 	if err != nil {
 		return nil, err
@@ -119,6 +152,11 @@ func loadManifests(inputPath, chartPath, valuesFile, releaseName, version, names
 
 // writeOutput dispatches to the appropriate output format handler.
 func writeOutput(cmd *cobra.Command, deps map[string][]dependency.Edge, format, outputFile string) error {
+	log.WithFields(log.Fields{
+		"func":   "writeOutput",
+		"format": format,
+	}).Debug("Generating output")
+
 	switch format {
 	case "dot":
 		return writeTextOutput(cmd, dependency.GenerateDOT(deps), outputFile, "DOT")
@@ -137,6 +175,12 @@ func writeOutput(cmd *cobra.Command, deps map[string][]dependency.Edge, format, 
 		if err := os.WriteFile(outputFile, imageData, 0644); err != nil {
 			return fmt.Errorf("failed to write %s output: %w", format, err)
 		}
+		log.WithFields(log.Fields{
+			"func":   "writeOutput",
+			"format": format,
+			"path":   outputFile,
+			"bytes":  len(imageData),
+		}).Debug("Image file saved")
 		return nil
 	default:
 		return fmt.Errorf("unknown output format: %s", format)
@@ -146,13 +190,18 @@ func writeOutput(cmd *cobra.Command, deps map[string][]dependency.Edge, format, 
 // writeTextOutput writes text content to stdout or a file.
 func writeTextOutput(cmd *cobra.Command, content, outputFile, label string) error {
 	if outputFile == "" {
+		log.WithField("func", "writeOutput").Debug("Writing to stdout")
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), content)
 		return err
 	}
 	if err := os.WriteFile(outputFile, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write %s output: %w", label, err)
 	}
-	log.Debugf("%s file saved to %s", label, outputFile)
+	log.WithFields(log.Fields{
+		"func": "writeOutput",
+		"path": outputFile,
+		"type": label,
+	}).Debug("File saved")
 	return nil
 }
 

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // sanitizeMermaidID replaces characters that are invalid in Mermaid node
@@ -62,13 +64,21 @@ func GenerateMermaid(deps map[string][]Edge) string {
 	}
 	sort.Strings(parents)
 
+	edgeCount := 0
 	for _, parent := range parents {
 		for _, edge := range deps[parent] {
 			parentID := sanitizeMermaidID(parent)
 			childID := sanitizeMermaidID(edge.ChildID)
 			sb.WriteString(fmt.Sprintf("    %s --> |%s| %s\n", parentID, edge.Reason, childID))
+			edgeCount++
 		}
 	}
+
+	log.WithFields(log.Fields{
+		"func":  "GenerateMermaid",
+		"nodes": len(connected),
+		"edges": edgeCount,
+	}).Debug("Generated Mermaid graph")
 
 	// classDef directives for category colors.
 	activeCats := make(map[string]bool)

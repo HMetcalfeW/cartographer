@@ -1,8 +1,10 @@
 package filter
 
 import (
+	"fmt"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -19,6 +21,14 @@ func Apply(
 		return objs
 	}
 
+	logger := log.WithFields(log.Fields{
+		"func":         "filter.Apply",
+		"input":        len(objs),
+		"excludeKinds": len(excludeKinds),
+		"excludeNames": len(excludeNames),
+	})
+	logger.Debug("Applying exclusion filters")
+
 	kindSet := make(map[string]bool, len(excludeKinds))
 	for _, k := range excludeKinds {
 		kindSet[strings.ToLower(k)] = true
@@ -32,12 +42,28 @@ func Apply(
 	result := make([]*unstructured.Unstructured, 0, len(objs))
 	for _, obj := range objs {
 		if kindSet[strings.ToLower(obj.GetKind())] {
+			log.WithFields(log.Fields{
+				"func":   "filter.Apply",
+				"id":     fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+				"reason": "kind",
+			}).Debug("Excluded resource")
 			continue
 		}
 		if nameSet[obj.GetName()] {
+			log.WithFields(log.Fields{
+				"func":   "filter.Apply",
+				"id":     fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()),
+				"reason": "name",
+			}).Debug("Excluded resource")
 			continue
 		}
 		result = append(result, obj)
 	}
+
+	logger.WithFields(log.Fields{
+		"excluded":  len(objs) - len(result),
+		"remaining": len(result),
+	}).Debug("Filter complete")
+
 	return result
 }
